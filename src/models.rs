@@ -30,6 +30,17 @@ pub struct BodyConfig {
     pub json: Option<serde_json::Value>,
     #[serde(default)]
     pub form: Option<HashMap<String, String>>,
+    #[serde(default)]
+    pub multipart: Option<Vec<MultipartField>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct MultipartField {
+    pub name: String,
+    #[serde(default)]
+    pub text: Option<String>,
+    #[serde(default)]
+    pub file: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

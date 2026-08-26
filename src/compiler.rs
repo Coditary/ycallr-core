@@ -156,6 +156,7 @@ impl Compiler {
 
     fn body_from_proto(body: &proto::BodyConfig) -> BodyConfig {
         BodyConfig {
+            multipart: None,
             json: body
                 .json
                 .as_ref()
