@@ -37,7 +37,39 @@ pub struct Command {
     #[serde(default)]
     pub params: HashMap<String, Parameter>,
     #[serde(default)]
+    pub responses: Option<ResponseConfig>,
+    #[serde(default)]
     pub commands: Option<HashMap<String, Command>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ResponseConfig {
+    pub success: Option<ResponseEntry>,
+    pub failure: Option<ResponseEntry>,
+    pub warn: Option<ResponseEntry>,
+    #[serde(flatten)]
+    pub codes: HashMap<String, ResponseEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ResponseEntry {
+    pub message: String,
+}
+
+impl ResponseConfig {
+    pub fn get_entry_for_status(&self, status: u16) -> Option<&ResponseEntry> {
+        let code_str = status.to_string();
+        if let Some(entry) = self.codes.get(&code_str) {
+            return Some(entry);
+        }
+
+        match status {
+            200..=299 => self.success.as_ref(),
+            300..=399 => self.warn.as_ref(),
+            400..=599 => self.failure.as_ref(),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -210,6 +242,7 @@ mod tests {
                 method: Some(HttpMethod::POST),
                 headers,
                 params,
+                responses: None,
                 commands: None,
             },
         );
@@ -238,6 +271,7 @@ mod tests {
                 method: Some(HttpMethod::POST),
                 headers: HashMap::new(),
                 params: HashMap::new(),
+                responses: None,
                 commands: None,
             },
         );
@@ -249,6 +283,7 @@ mod tests {
                 method: Some(HttpMethod::GET),
                 headers: HashMap::new(),
                 params: HashMap::new(),
+                responses: None,
                 commands: None,
             },
         );
@@ -261,6 +296,7 @@ mod tests {
                 method: Some(HttpMethod::GET),
                 headers: HashMap::new(),
                 params: HashMap::new(),
+                responses: None,
                 commands: Some(issues_commands),
             },
         );
@@ -273,6 +309,7 @@ mod tests {
                 method: Some(HttpMethod::GET),
                 headers: HashMap::new(),
                 params: HashMap::new(),
+                responses: None,
                 commands: Some(repos_commands),
             },
         );
@@ -377,6 +414,7 @@ mod tests {
             method: Some(HttpMethod::POST),
             headers: HashMap::new(),
             params: HashMap::new(),
+            responses: None,
             commands: None,
         };
 
@@ -396,6 +434,7 @@ mod tests {
             method: Some(HttpMethod::POST),
             headers: HashMap::new(),
             params: HashMap::new(),
+            responses: None,
             commands: None,
         };
 
@@ -412,6 +451,7 @@ mod tests {
             method: None,
             headers: HashMap::new(),
             params: HashMap::new(),
+            responses: None,
             commands: Some(HashMap::new()),
         };
 
@@ -437,6 +477,7 @@ mod tests {
             method: Some(HttpMethod::GET),
             headers: HashMap::new(),
             params: HashMap::new(),
+            responses: None,
             commands: None,
         };
         assert!(leaf.is_leaf());
@@ -447,6 +488,7 @@ mod tests {
             method: None,
             headers: HashMap::new(),
             params: HashMap::new(),
+            responses: None,
             commands: Some(HashMap::new()),
         };
         assert!(!branch.is_leaf());
@@ -463,6 +505,7 @@ mod tests {
                 method: Some(HttpMethod::GET),
                 headers: HashMap::new(),
                 params: HashMap::new(),
+                responses: None,
                 commands: None,
             },
         );
@@ -472,6 +515,7 @@ mod tests {
             method: None,
             headers: HashMap::new(),
             params: HashMap::new(),
+            responses: None,
             commands: Some(sub_commands),
         };
         assert!(branch.is_branch());
@@ -482,6 +526,7 @@ mod tests {
             method: Some(HttpMethod::GET),
             headers: HashMap::new(),
             params: HashMap::new(),
+            responses: None,
             commands: None,
         };
         assert!(!leaf.is_branch());
@@ -551,5 +596,112 @@ commands:
     fn test_env_empty() {
         let api = create_test_api();
         assert!(api.env.is_empty());
+    }
+
+    #[test]
+    fn test_response_config_parsing() {
+        let yaml = r#"
+name: test
+version: "1.0.0"
+base_url: https://api.test.com
+commands:
+  create:
+    endpoint: /items
+    method: POST
+    responses:
+      success:
+        message: "Created {output.title}"
+      failure:
+        message: "Failed to create"
+      404:
+        message: "{input.owner} not found"
+"#;
+        let api = crate::yaml_parser::parse_yaml(yaml).unwrap();
+        let cmd = api.commands.get("create").unwrap();
+        let responses = cmd.responses.as_ref().unwrap();
+
+        assert_eq!(
+            responses.success.as_ref().unwrap().message,
+            "Created {output.title}"
+        );
+        assert_eq!(
+            responses.failure.as_ref().unwrap().message,
+            "Failed to create"
+        );
+        assert_eq!(
+            responses.codes.get("404").unwrap().message,
+            "{input.owner} not found"
+        );
+    }
+
+    #[test]
+    fn test_response_config_get_entry_for_status() {
+        let mut codes = HashMap::new();
+        codes.insert(
+            "404".to_string(),
+            ResponseEntry {
+                message: "Not found".to_string(),
+            },
+        );
+        let config = ResponseConfig {
+            success: Some(ResponseEntry {
+                message: "OK".to_string(),
+            }),
+            failure: Some(ResponseEntry {
+                message: "Error".to_string(),
+            }),
+            warn: None,
+            codes,
+        };
+
+        assert_eq!(config.get_entry_for_status(200).unwrap().message, "OK");
+        assert_eq!(config.get_entry_for_status(201).unwrap().message, "OK");
+        assert_eq!(
+            config.get_entry_for_status(404).unwrap().message,
+            "Not found"
+        );
+        assert_eq!(config.get_entry_for_status(500).unwrap().message, "Error");
+        assert!(config.get_entry_for_status(301).is_none());
+    }
+
+    #[test]
+    fn test_response_config_exact_code_takes_priority() {
+        let mut codes = HashMap::new();
+        codes.insert(
+            "200".to_string(),
+            ResponseEntry {
+                message: "Exact 200".to_string(),
+            },
+        );
+        let config = ResponseConfig {
+            success: Some(ResponseEntry {
+                message: "Any success".to_string(),
+            }),
+            failure: None,
+            warn: None,
+            codes,
+        };
+
+        assert_eq!(
+            config.get_entry_for_status(200).unwrap().message,
+            "Exact 200"
+        );
+        assert_eq!(
+            config.get_entry_for_status(201).unwrap().message,
+            "Any success"
+        );
+    }
+
+    #[test]
+    fn test_response_config_empty() {
+        let config = ResponseConfig {
+            success: None,
+            failure: None,
+            warn: None,
+            codes: HashMap::new(),
+        };
+
+        assert!(config.get_entry_for_status(200).is_none());
+        assert!(config.get_entry_for_status(404).is_none());
     }
 }

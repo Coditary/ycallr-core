@@ -45,6 +45,35 @@ impl YcallrApi {
         self.inner.env.get(index).map(|e| e.required)
     }
 
+    #[wasm_bindgen(js_name = commandHasResponses)]
+    pub fn command_has_responses(&self, name: &str) -> bool {
+        self.inner
+            .get_command(name)
+            .ok()
+            .and_then(|cmd| cmd.responses.as_ref())
+            .is_some()
+    }
+
+    #[wasm_bindgen(js_name = commandSuccessMessage)]
+    pub fn command_success_message(&self, name: &str) -> Option<String> {
+        self.inner
+            .get_command(name)
+            .ok()
+            .and_then(|cmd| cmd.responses.as_ref())
+            .and_then(|r| r.success.as_ref())
+            .map(|e| e.message.clone())
+    }
+
+    #[wasm_bindgen(js_name = commandFailureMessage)]
+    pub fn command_failure_message(&self, name: &str) -> Option<String> {
+        self.inner
+            .get_command(name)
+            .ok()
+            .and_then(|cmd| cmd.responses.as_ref())
+            .and_then(|r| r.failure.as_ref())
+            .map(|e| e.message.clone())
+    }
+
     pub fn to_json(&self) -> std::result::Result<String, JsValue> {
         serde_json::to_string_pretty(&self.inner).map_err(|e| JsValue::from_str(&e.to_string()))
     }
@@ -133,6 +162,24 @@ commands:
         description: Item ID
         type: string
         required: true
+"#;
+
+    const RESPONSE_YAML: &str = r#"
+name: response-api
+version: "1.0.0"
+description: API with responses
+base_url: https://api.test.com
+commands:
+  create-item:
+    endpoint: /items
+    method: POST
+    responses:
+      success:
+        message: "Created {output.name}"
+      failure:
+        message: "Failed to create item"
+      404:
+        message: "{input.owner} not found"
 "#;
 
     #[wasm_bindgen_test]
@@ -233,5 +280,38 @@ commands:
         let api = YcallrApi::new(ENV_YAML).unwrap();
         let json = api.to_json().unwrap();
         assert!(json.contains("${GITHUB_TOKEN}"));
+    }
+
+    #[wasm_bindgen_test]
+    fn test_wasm_command_has_responses() {
+        let api = YcallrApi::new(RESPONSE_YAML).unwrap();
+        assert!(api.command_has_responses("create-item"));
+        assert!(!api.command_has_responses("nonexistent"));
+    }
+
+    #[wasm_bindgen_test]
+    fn test_wasm_command_success_message() {
+        let api = YcallrApi::new(RESPONSE_YAML).unwrap();
+        assert_eq!(
+            api.command_success_message("create-item"),
+            Some("Created {output.name}".to_string())
+        );
+    }
+
+    #[wasm_bindgen_test]
+    fn test_wasm_command_failure_message() {
+        let api = YcallrApi::new(RESPONSE_YAML).unwrap();
+        assert_eq!(
+            api.command_failure_message("create-item"),
+            Some("Failed to create item".to_string())
+        );
+    }
+
+    #[wasm_bindgen_test]
+    fn test_wasm_response_yaml_in_json() {
+        let api = YcallrApi::new(RESPONSE_YAML).unwrap();
+        let json = api.to_json().unwrap();
+        assert!(json.contains("Created {output.name}"));
+        assert!(json.contains("Failed to create item"));
     }
 }

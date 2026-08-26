@@ -1,5 +1,7 @@
 use crate::error::{Result, YcallrError};
-use crate::models::{ApiDefinition, Command, EnvVar, HttpMethod, ParamType, Parameter};
+use crate::models::{
+    ApiDefinition, Command, EnvVar, HttpMethod, ParamType, Parameter, ResponseConfig, ResponseEntry,
+};
 use crate::proto;
 use prost::Message;
 
@@ -63,6 +65,7 @@ impl Compiler {
                 .map(|(k, v)| (k.clone(), Self::param_to_proto(v)))
                 .collect(),
             commands,
+            responses: cmd.responses.as_ref().map(Self::response_config_to_proto),
         }
     }
 
@@ -83,12 +86,51 @@ impl Compiler {
             method: cmd.method.map(|m| Self::method_from_i32(m)),
             headers: cmd.headers.clone(),
             params,
+            responses: cmd.responses.as_ref().map(Self::response_config_from_proto),
             commands: if commands.is_empty() {
                 None
             } else {
                 Some(commands)
             },
         })
+    }
+
+    fn response_config_to_proto(config: &ResponseConfig) -> proto::ResponseConfig {
+        proto::ResponseConfig {
+            success: config.success.as_ref().map(Self::response_entry_to_proto),
+            failure: config.failure.as_ref().map(Self::response_entry_to_proto),
+            warn: config.warn.as_ref().map(Self::response_entry_to_proto),
+            codes: config
+                .codes
+                .iter()
+                .map(|(k, v)| (k.clone(), Self::response_entry_to_proto(v)))
+                .collect(),
+        }
+    }
+
+    fn response_config_from_proto(config: &proto::ResponseConfig) -> ResponseConfig {
+        ResponseConfig {
+            success: config.success.as_ref().map(Self::response_entry_from_proto),
+            failure: config.failure.as_ref().map(Self::response_entry_from_proto),
+            warn: config.warn.as_ref().map(Self::response_entry_from_proto),
+            codes: config
+                .codes
+                .iter()
+                .map(|(k, v)| (k.clone(), Self::response_entry_from_proto(v)))
+                .collect(),
+        }
+    }
+
+    fn response_entry_to_proto(entry: &ResponseEntry) -> proto::ResponseEntry {
+        proto::ResponseEntry {
+            message: entry.message.clone(),
+        }
+    }
+
+    fn response_entry_from_proto(entry: &proto::ResponseEntry) -> ResponseEntry {
+        ResponseEntry {
+            message: entry.message.clone(),
+        }
     }
 
     fn env_to_proto(env: &EnvVar) -> proto::EnvVar {
@@ -201,6 +243,7 @@ mod tests {
                 method: Some(HttpMethod::POST),
                 headers,
                 params,
+                responses: None,
                 commands: None,
             },
         );
@@ -229,6 +272,7 @@ mod tests {
                 method: Some(HttpMethod::POST),
                 headers: HashMap::new(),
                 params: HashMap::new(),
+                responses: None,
                 commands: None,
             },
         );
@@ -241,6 +285,7 @@ mod tests {
                 method: Some(HttpMethod::GET),
                 headers: HashMap::new(),
                 params: HashMap::new(),
+                responses: None,
                 commands: Some(issues_commands),
             },
         );
@@ -253,6 +298,7 @@ mod tests {
                 method: Some(HttpMethod::GET),
                 headers: HashMap::new(),
                 params: HashMap::new(),
+                responses: None,
                 commands: Some(repos_commands),
             },
         );
@@ -287,6 +333,7 @@ mod tests {
                 method: Some(HttpMethod::GET),
                 headers,
                 params: HashMap::new(),
+                responses: None,
                 commands: None,
             },
         );
@@ -306,6 +353,59 @@ mod tests {
                     required: false,
                 },
             ],
+            commands,
+        }
+    }
+
+    fn create_response_api() -> ApiDefinition {
+        let mut commands = HashMap::new();
+        let mut params = HashMap::new();
+
+        params.insert(
+            "owner".to_string(),
+            Parameter {
+                description: "Repository owner".to_string(),
+                param_type: ParamType::String,
+                required: true,
+            },
+        );
+
+        let mut codes = HashMap::new();
+        codes.insert(
+            "404".to_string(),
+            ResponseEntry {
+                message: "{input.owner} does not exist".to_string(),
+            },
+        );
+
+        commands.insert(
+            "get-repo".to_string(),
+            Command {
+                description: Some("Get a repository".to_string()),
+                endpoint: Some("/repos/{owner}/{repo}".to_string()),
+                method: Some(HttpMethod::GET),
+                headers: HashMap::new(),
+                params,
+                responses: Some(ResponseConfig {
+                    success: Some(ResponseEntry {
+                        message: "Got repo {output.name}".to_string(),
+                    }),
+                    failure: Some(ResponseEntry {
+                        message: "Failed to get repo".to_string(),
+                    }),
+                    warn: None,
+                    codes,
+                }),
+                commands: None,
+            },
+        );
+
+        ApiDefinition {
+            name: "github".to_string(),
+            version: "1.0.0".to_string(),
+            description: "GitHub API".to_string(),
+            base_url: "https://api.github.com".to_string(),
+            env: vec![],
             commands,
         }
     }
@@ -423,5 +523,29 @@ mod tests {
 
         let cmd = restored.commands.get("create-issue").unwrap();
         assert_eq!(cmd.description, Some("Create an issue".to_string()));
+    }
+
+    #[test]
+    fn test_response_config_proto_roundtrip() {
+        let api = create_response_api();
+        let proto_bytes = Compiler::yaml_to_proto(&api).unwrap();
+        let restored = Compiler::proto_to_yaml(&proto_bytes).unwrap();
+
+        let cmd = restored.commands.get("get-repo").unwrap();
+        let responses = cmd.responses.as_ref().unwrap();
+
+        assert_eq!(
+            responses.success.as_ref().unwrap().message,
+            "Got repo {output.name}"
+        );
+        assert_eq!(
+            responses.failure.as_ref().unwrap().message,
+            "Failed to get repo"
+        );
+        assert!(responses.warn.is_none());
+        assert_eq!(
+            responses.codes.get("404").unwrap().message,
+            "{input.owner} does not exist"
+        );
     }
 }

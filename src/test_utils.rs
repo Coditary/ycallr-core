@@ -1,5 +1,7 @@
 use crate::client::ApiResponse;
-use crate::models::{ApiDefinition, Command, EnvVar, HttpMethod, ParamType, Parameter};
+use crate::models::{
+    ApiDefinition, Command, EnvVar, HttpMethod, ParamType, Parameter, ResponseConfig, ResponseEntry,
+};
 use std::collections::HashMap;
 
 pub struct MockApiClient {
@@ -98,6 +100,7 @@ pub fn github_api() -> ApiDefinition {
             headers: get_repo_headers,
             params: get_repo_params,
             commands: None,
+            responses: None,
         },
     );
 
@@ -143,6 +146,7 @@ pub fn github_api() -> ApiDefinition {
             headers: create_issue_headers,
             params: create_issue_params,
             commands: None,
+            responses: None,
         },
     );
 
@@ -187,6 +191,7 @@ pub fn github_api() -> ApiDefinition {
             headers: list_issues_headers,
             params: list_issues_params,
             commands: None,
+            responses: None,
         },
     );
 
@@ -225,6 +230,7 @@ pub fn simple_api() -> ApiDefinition {
             headers,
             params,
             commands: None,
+            responses: None,
         },
     );
 
@@ -237,6 +243,7 @@ pub fn simple_api() -> ApiDefinition {
             headers: HashMap::new(),
             params: HashMap::new(),
             commands: None,
+            responses: None,
         },
     );
 
@@ -265,6 +272,7 @@ pub fn nested_github_api() -> ApiDefinition {
             headers: HashMap::new(),
             params: HashMap::new(),
             commands: None,
+            responses: None,
         },
     );
     issues_commands.insert(
@@ -276,6 +284,7 @@ pub fn nested_github_api() -> ApiDefinition {
             headers: HashMap::new(),
             params: HashMap::new(),
             commands: None,
+            responses: None,
         },
     );
 
@@ -288,6 +297,7 @@ pub fn nested_github_api() -> ApiDefinition {
             headers: HashMap::new(),
             params: HashMap::new(),
             commands: Some(issues_commands),
+            responses: None,
         },
     );
 
@@ -300,6 +310,7 @@ pub fn nested_github_api() -> ApiDefinition {
             headers: HashMap::new(),
             params: HashMap::new(),
             commands: None,
+            responses: None,
         },
     );
 
@@ -312,6 +323,7 @@ pub fn nested_github_api() -> ApiDefinition {
             headers: HashMap::new(),
             params: HashMap::new(),
             commands: Some(repos_commands),
+            responses: None,
         },
     );
 
@@ -325,6 +337,7 @@ pub fn nested_github_api() -> ApiDefinition {
             headers: HashMap::new(),
             params: HashMap::new(),
             commands: None,
+            responses: None,
         },
     );
 
@@ -337,6 +350,7 @@ pub fn nested_github_api() -> ApiDefinition {
             headers: HashMap::new(),
             params: HashMap::new(),
             commands: Some(users_commands),
+            responses: None,
         },
     );
 
@@ -375,6 +389,7 @@ pub fn env_api() -> ApiDefinition {
             headers,
             params: HashMap::new(),
             commands: None,
+            responses: None,
         },
     );
 
@@ -397,11 +412,56 @@ pub fn env_api() -> ApiDefinition {
     }
 }
 
+pub fn response_api() -> ApiDefinition {
+    let mut commands = HashMap::new();
+
+    commands.insert(
+        "create-item".to_string(),
+        Command {
+            description: Some("Create an item".to_string()),
+            endpoint: Some("/items".to_string()),
+            method: Some(HttpMethod::POST),
+            headers: HashMap::new(),
+            params: HashMap::new(),
+            commands: None,
+            responses: Some(ResponseConfig {
+                success: Some(ResponseEntry {
+                    message: "Created {output.name}".to_string(),
+                }),
+                failure: Some(ResponseEntry {
+                    message: "Failed to create item".to_string(),
+                }),
+                warn: None,
+                codes: {
+                    let mut m = HashMap::new();
+                    m.insert(
+                        "404".to_string(),
+                        ResponseEntry {
+                            message: "{input.owner} not found".to_string(),
+                        },
+                    );
+                    m
+                },
+            }),
+        },
+    );
+
+    ApiDefinition {
+        name: "response-api".to_string(),
+        version: "1.0.0".to_string(),
+        description: "API with response configs".to_string(),
+        base_url: "https://api.example.com".to_string(),
+        env: vec![],
+        commands,
+    }
+}
+
 pub fn response_ok(body: serde_json::Value) -> ApiResponse {
     ApiResponse {
         status: 200,
         headers: HashMap::new(),
         body,
+        message: None,
     }
 }
 
@@ -410,6 +470,7 @@ pub fn response_created(body: serde_json::Value) -> ApiResponse {
         status: 201,
         headers: HashMap::new(),
         body,
+        message: None,
     }
 }
 
@@ -418,6 +479,7 @@ pub fn response_not_found() -> ApiResponse {
         status: 404,
         headers: HashMap::new(),
         body: serde_json::json!({"message": "Not Found"}),
+        message: None,
     }
 }
 
@@ -430,6 +492,16 @@ pub fn response_with_headers(
         status,
         headers,
         body,
+        message: None,
+    }
+}
+
+pub fn response_with_message(status: u16, body: serde_json::Value, message: String) -> ApiResponse {
+    ApiResponse {
+        status,
+        headers: HashMap::new(),
+        body,
+        message: Some(message),
     }
 }
 
@@ -648,5 +720,47 @@ mod tests {
             cmd.headers.get("Authorization").unwrap(),
             "Bearer ${GITHUB_TOKEN}"
         );
+    }
+
+    #[test]
+    fn test_response_api_structure() {
+        let api = response_api();
+        assert_eq!(api.name, "response-api");
+        let cmd = api.commands.get("create-item").unwrap();
+        assert!(cmd.responses.is_some());
+        let responses = cmd.responses.as_ref().unwrap();
+        assert!(responses.success.is_some());
+        assert!(responses.failure.is_some());
+        assert!(responses.codes.contains_key("404"));
+    }
+
+    #[test]
+    fn test_response_api_messages() {
+        let api = response_api();
+        let cmd = api.commands.get("create-item").unwrap();
+        let responses = cmd.responses.as_ref().unwrap();
+        assert_eq!(
+            responses.success.as_ref().unwrap().message,
+            "Created {output.name}"
+        );
+        assert_eq!(
+            responses.failure.as_ref().unwrap().message,
+            "Failed to create item"
+        );
+        assert_eq!(
+            responses.codes.get("404").unwrap().message,
+            "{input.owner} not found"
+        );
+    }
+
+    #[test]
+    fn test_response_with_message_helper() {
+        let resp = response_with_message(
+            200,
+            serde_json::json!({"ok": true}),
+            "Created item".to_string(),
+        );
+        assert_eq!(resp.status, 200);
+        assert_eq!(resp.message, Some("Created item".to_string()));
     }
 }

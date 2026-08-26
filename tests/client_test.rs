@@ -39,6 +39,7 @@ fn create_test_api(base_url: &str) -> ApiDefinition {
             headers: get_headers,
             params: get_params,
             commands: None,
+            responses: None,
         },
     );
 
@@ -64,6 +65,7 @@ fn create_test_api(base_url: &str) -> ApiDefinition {
             headers: post_headers,
             params: post_params,
             commands: None,
+            responses: None,
         },
     );
 
@@ -92,6 +94,7 @@ fn create_nested_test_api(base_url: &str) -> ApiDefinition {
             headers: HashMap::new(),
             params: HashMap::new(),
             commands: None,
+            responses: None,
         },
     );
 
@@ -104,6 +107,7 @@ fn create_nested_test_api(base_url: &str) -> ApiDefinition {
             headers: HashMap::new(),
             params: HashMap::new(),
             commands: Some(issues_commands),
+            responses: None,
         },
     );
 
@@ -116,6 +120,7 @@ fn create_nested_test_api(base_url: &str) -> ApiDefinition {
             headers: HashMap::new(),
             params: HashMap::new(),
             commands: Some(repos_commands),
+            responses: None,
         },
     );
 
@@ -147,6 +152,7 @@ fn create_env_test_api(base_url: &str) -> ApiDefinition {
             headers,
             params: HashMap::new(),
             commands: None,
+            responses: None,
         },
     );
 

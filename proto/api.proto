@@ -21,6 +21,18 @@ message Command {
   map<string, string> headers = 3;
   map<string, Parameter> params = 4;
   map<string, Command> commands = 5;
+  optional ResponseConfig responses = 7;
+}
+
+message ResponseConfig {
+  optional ResponseEntry success = 1;
+  optional ResponseEntry failure = 2;
+  optional ResponseEntry warn = 3;
+  map<string, ResponseEntry> codes = 4;
+}
+
+message ResponseEntry {
+  string message = 1;
 }
 
 message EnvVar {
