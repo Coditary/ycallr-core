@@ -1,0 +1,42 @@
+syntax = "proto3";
+
+package ycallr;
+
+option java_package = "io.ycallr.core";
+option java_multiple_files = true;
+
+message ApiDefinition {
+  string name = 1;
+  string version = 2;
+  string description = 3;
+  string base_url = 4;
+  map<string, Command> commands = 5;
+}
+
+message Command {
+  string endpoint = 1;
+  HttpMethod method = 2;
+  map<string, string> headers = 3;
+  map<string, Parameter> params = 4;
+}
+
+enum HttpMethod {
+  GET = 0;
+  POST = 1;
+  PUT = 2;
+  DELETE = 3;
+  PATCH = 4;
+}
+
+message Parameter {
+  string description = 1;
+  ParamType type = 2;
+  bool required = 3;
+}
+
+enum ParamType {
+  STRING = 0;
+  NUMBER = 1;
+  BOOLEAN = 2;
+  ARRAY = 3;
+}

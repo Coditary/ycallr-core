@@ -1,0 +1,66 @@
+name: github
+version: "1.0.0"
+description: GitHub REST API
+base_url: https://api.github.com
+commands:
+  create-issue:
+    endpoint: /repos/{owner}/{repo}/issues
+    method: POST
+    headers:
+      Accept: application/vnd.github.v3+json
+      Content-Type: application/json
+    params:
+      owner:
+        description: Repository owner
+        type: string
+        required: true
+      repo:
+        description: Repository name
+        type: string
+        required: true
+      title:
+        description: Issue title
+        type: string
+        required: true
+      body:
+        description: Issue body
+        type: string
+        required: false
+
+  list-issues:
+    endpoint: /repos/{owner}/{repo}/issues
+    method: GET
+    headers:
+      Accept: application/vnd.github.v3+json
+    params:
+      owner:
+        description: Repository owner
+        type: string
+        required: true
+      repo:
+        description: Repository name
+        type: string
+        required: true
+      state:
+        description: Filter by state (open, closed, all)
+        type: string
+        required: false
+
+  get-issue:
+    endpoint: /repos/{owner}/{repo}/issues/{issue_number}
+    method: GET
+    headers:
+      Accept: application/vnd.github.v3+json
+    params:
+      owner:
+        description: Repository owner
+        type: string
+        required: true
+      repo:
+        description: Repository name
+        type: string
+        required: true
+      issue_number:
+        description: Issue number
+        type: number
+        required: true

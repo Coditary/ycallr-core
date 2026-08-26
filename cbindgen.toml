@@ -1,0 +1,13 @@
+language = "C"
+
+[parse]
+parse_deps = false
+exclude = []
+
+[export]
+include = []
+exclude = []
+item_types = ["struct", "enum", "union", "typedef", "function", "constant"]
+prefix = ""
+
+[export.rename]
