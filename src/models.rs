@@ -28,6 +28,8 @@ fn default_true() -> bool {
 pub struct BodyConfig {
     #[serde(default)]
     pub json: Option<serde_json::Value>,
+    #[serde(default)]
+    pub form: Option<HashMap<String, String>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

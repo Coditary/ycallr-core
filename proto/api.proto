@@ -38,6 +38,7 @@ message ResponseEntry {
 
 message BodyConfig {
   optional string json = 1;
+  map<string, string> fields = 2;
 }
 
 message EnvVar {

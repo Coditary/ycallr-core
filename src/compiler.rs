@@ -5,6 +5,7 @@ use crate::models::{
 };
 use crate::proto;
 use prost::Message;
+use std::collections::HashMap;
 
 pub struct Compiler;
 
@@ -139,6 +140,17 @@ impl Compiler {
     fn body_to_proto(body: &BodyConfig) -> proto::BodyConfig {
         proto::BodyConfig {
             json: body.json.as_ref().map(|v| v.to_string()),
+            fields: body
+                .form
+                .as_ref()
+                .map(|m| {
+                    let mut map = std::collections::HashMap::new();
+                    for (k, v) in m {
+                        map.insert(k.clone(), v.clone());
+                    }
+                    map
+                })
+                .unwrap_or_default(),
         }
     }
 
@@ -148,6 +160,17 @@ impl Compiler {
                 .json
                 .as_ref()
                 .and_then(|s| serde_json::from_str(s).ok()),
+            form: body
+                .fields
+                .iter()
+                .next()
+                .map(|m| {
+                    let (k, v) = (m.0.clone(), m.1.clone());
+                    let mut map = HashMap::new();
+                    map.insert(k, v);
+                    Some(map)
+                })
+                .flatten(),
         }
     }
 
