@@ -1,7 +1,7 @@
-use prost::Message;
 use crate::error::{Result, YcallrError};
 use crate::models::{ApiDefinition, Command, HttpMethod, ParamType, Parameter};
 use crate::proto;
+use prost::Message;
 
 pub struct Compiler;
 
@@ -23,8 +23,8 @@ impl Compiler {
     }
 
     pub fn proto_to_yaml(data: &[u8]) -> Result<ApiDefinition> {
-        let proto_api = proto::ApiDefinition::decode(data)
-            .map_err(|e| YcallrError::Protobuf(e.to_string()))?;
+        let proto_api =
+            proto::ApiDefinition::decode(data).map_err(|e| YcallrError::Protobuf(e.to_string()))?;
 
         let mut commands = std::collections::HashMap::new();
         for (k, v) in proto_api.commands {
@@ -195,5 +195,26 @@ mod tests {
         let cmd = restored.commands.get("create-issue").unwrap();
         assert_eq!(cmd.method, HttpMethod::POST);
         assert!(cmd.headers.contains_key("Accept"));
+    }
+
+    #[test]
+    fn test_method_from_i32_fallback() {
+        assert_eq!(Compiler::method_from_i32(0), HttpMethod::GET);
+        assert_eq!(Compiler::method_from_i32(1), HttpMethod::POST);
+        assert_eq!(Compiler::method_from_i32(2), HttpMethod::PUT);
+        assert_eq!(Compiler::method_from_i32(3), HttpMethod::DELETE);
+        assert_eq!(Compiler::method_from_i32(4), HttpMethod::PATCH);
+        assert_eq!(Compiler::method_from_i32(99), HttpMethod::GET);
+        assert_eq!(Compiler::method_from_i32(-1), HttpMethod::GET);
+    }
+
+    #[test]
+    fn test_type_from_i32_fallback() {
+        assert_eq!(Compiler::type_from_i32(0), ParamType::String);
+        assert_eq!(Compiler::type_from_i32(1), ParamType::Number);
+        assert_eq!(Compiler::type_from_i32(2), ParamType::Boolean);
+        assert_eq!(Compiler::type_from_i32(3), ParamType::Array);
+        assert_eq!(Compiler::type_from_i32(99), ParamType::String);
+        assert_eq!(Compiler::type_from_i32(-1), ParamType::String);
     }
 }

@@ -1,5 +1,5 @@
-use wasm_bindgen::prelude::*;
 use crate::models::ApiDefinition;
+use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen]
 pub struct YcallrApi {
@@ -10,8 +10,8 @@ pub struct YcallrApi {
 impl YcallrApi {
     #[wasm_bindgen(constructor)]
     pub fn new(yaml: &str) -> std::result::Result<YcallrApi, JsValue> {
-        let api = crate::yaml_parser::parse_yaml(yaml)
-            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+        let api =
+            crate::yaml_parser::parse_yaml(yaml).map_err(|e| JsValue::from_str(&e.to_string()))?;
         Ok(YcallrApi { inner: api })
     }
 
@@ -31,8 +31,7 @@ impl YcallrApi {
     }
 
     pub fn to_json(&self) -> std::result::Result<String, JsValue> {
-        serde_json::to_string_pretty(&self.inner)
-            .map_err(|e| JsValue::from_str(&e.to_string()))
+        serde_json::to_string_pretty(&self.inner).map_err(|e| JsValue::from_str(&e.to_string()))
     }
 
     #[wasm_bindgen(js_name = toProto)]
@@ -44,5 +43,84 @@ impl YcallrApi {
     #[wasm_bindgen(js_name = commandExists)]
     pub fn command_exists(&self, name: &str) -> bool {
         self.inner.commands.contains_key(name)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use wasm_bindgen_test::*;
+
+    const VALID_YAML: &str = r#"
+name: test-api
+version: "1.0.0"
+description: Test API for WASM
+base_url: https://api.test.com
+commands:
+  get-item:
+    endpoint: /items/{id}
+    method: GET
+    params:
+      id:
+        description: Item ID
+        type: string
+        required: true
+  create-item:
+    endpoint: /items
+    method: POST
+    params:
+      name:
+        description: Item name
+        type: string
+        required: true
+"#;
+
+    #[wasm_bindgen_test]
+    fn test_wasm_new() {
+        let api = YcallrApi::new(VALID_YAML).unwrap();
+        assert_eq!(api.name(), "test-api");
+    }
+
+    #[wasm_bindgen_test]
+    fn test_wasm_invalid_yaml() {
+        let result = YcallrApi::new("not valid yaml {{{");
+        assert!(result.is_err());
+    }
+
+    #[wasm_bindgen_test]
+    fn test_wasm_empty_yaml() {
+        let result = YcallrApi::new("");
+        assert!(result.is_err());
+    }
+
+    #[wasm_bindgen_test]
+    fn test_wasm_getters() {
+        let api = YcallrApi::new(VALID_YAML).unwrap();
+        assert_eq!(api.name(), "test-api");
+        assert_eq!(api.version(), "1.0.0");
+        assert_eq!(api.base_url(), "https://api.test.com");
+    }
+
+    #[wasm_bindgen_test]
+    fn test_wasm_to_json() {
+        let api = YcallrApi::new(VALID_YAML).unwrap();
+        let json = api.to_json().unwrap();
+        assert!(json.contains("test-api"));
+        assert!(json.contains("https://api.test.com"));
+    }
+
+    #[wasm_bindgen_test]
+    fn test_wasm_to_proto() {
+        let api = YcallrApi::new(VALID_YAML).unwrap();
+        let proto = api.to_proto().unwrap();
+        assert!(!proto.is_empty());
+    }
+
+    #[wasm_bindgen_test]
+    fn test_wasm_command_exists() {
+        let api = YcallrApi::new(VALID_YAML).unwrap();
+        assert!(api.command_exists("get-item"));
+        assert!(api.command_exists("create-item"));
+        assert!(!api.command_exists("nonexistent"));
     }
 }

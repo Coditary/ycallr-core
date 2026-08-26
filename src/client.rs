@@ -1,7 +1,7 @@
-use std::collections::HashMap;
-use serde::{Deserialize, Serialize};
 use crate::error::{Result, YcallrError};
 use crate::models::{ApiDefinition, HttpMethod};
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
 pub enum AuthConfig {
@@ -121,7 +121,7 @@ impl YcallrClient {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::{Command, HttpMethod, Parameter, ParamType};
+    use crate::models::{Command, HttpMethod, ParamType, Parameter};
 
     fn create_test_api() -> ApiDefinition {
         let mut commands = HashMap::new();
@@ -200,10 +200,7 @@ mod tests {
     #[test]
     fn test_client_with_auth() {
         let api = create_test_api();
-        let client = YcallrClient::with_auth(
-            api,
-            AuthConfig::Bearer("test-token".to_string()),
-        );
+        let client = YcallrClient::with_auth(api, AuthConfig::Bearer("test-token".to_string()));
         assert!(client.is_ok());
         let client = client.unwrap();
         assert!(client.auth.is_some());
@@ -250,5 +247,150 @@ mod tests {
 
         assert_eq!(response.status, 200);
         assert_eq!(response.body["key"], "value");
+    }
+}
+
+#[cfg(test)]
+#[cfg(feature = "test-utils")]
+mod client_integration_tests {
+    use super::*;
+    use crate::models::{Command, ParamType, Parameter};
+    use crate::test_utils::{make_params, response_ok};
+
+    fn create_full_api() -> ApiDefinition {
+        let mut commands = HashMap::new();
+
+        let mut params = HashMap::new();
+        params.insert(
+            "id".to_string(),
+            Parameter {
+                description: "Resource ID".to_string(),
+                param_type: ParamType::String,
+                required: true,
+            },
+        );
+
+        let mut headers = HashMap::new();
+        headers.insert("Accept".to_string(), "application/json".to_string());
+
+        commands.insert(
+            "get-item".to_string(),
+            Command {
+                endpoint: "/items/{id}".to_string(),
+                method: HttpMethod::GET,
+                headers: headers.clone(),
+                params: params.clone(),
+            },
+        );
+
+        commands.insert(
+            "create-item".to_string(),
+            Command {
+                endpoint: "/items".to_string(),
+                method: HttpMethod::POST,
+                headers: headers.clone(),
+                params: HashMap::new(),
+            },
+        );
+
+        commands.insert(
+            "update-item".to_string(),
+            Command {
+                endpoint: "/items/{id}".to_string(),
+                method: HttpMethod::PUT,
+                headers: headers.clone(),
+                params,
+            },
+        );
+
+        commands.insert(
+            "delete-item".to_string(),
+            Command {
+                endpoint: "/items/{id}".to_string(),
+                method: HttpMethod::DELETE,
+                headers: headers.clone(),
+                params: HashMap::new(),
+            },
+        );
+
+        commands.insert(
+            "patch-item".to_string(),
+            Command {
+                endpoint: "/items/{id}".to_string(),
+                method: HttpMethod::PATCH,
+                headers,
+                params: HashMap::new(),
+            },
+        );
+
+        ApiDefinition {
+            name: "test".to_string(),
+            version: "1.0.0".to_string(),
+            description: "Test API".to_string(),
+            base_url: "https://api.test.com".to_string(),
+            commands,
+        }
+    }
+
+    #[test]
+    fn test_call_with_mock_put() {
+        let mut mock = crate::test_utils::MockApiClient::new();
+        mock.expect(
+            "update-item",
+            response_ok(serde_json::json!({"updated": true})),
+        );
+
+        let params = make_params(&[("id", "1")]);
+        let response = mock.call("update-item", &params, None).unwrap();
+
+        assert_eq!(response.status, 200);
+        assert_eq!(response.body["updated"], true);
+    }
+
+    #[test]
+    fn test_call_with_mock_delete() {
+        let mut mock = crate::test_utils::MockApiClient::new();
+        mock.expect(
+            "delete-item",
+            response_ok(serde_json::json!({"deleted": true})),
+        );
+
+        let params = make_params(&[("id", "1")]);
+        let response = mock.call("delete-item", &params, None).unwrap();
+
+        assert_eq!(response.status, 200);
+        assert_eq!(response.body["deleted"], true);
+    }
+
+    #[test]
+    fn test_call_with_mock_patch() {
+        let mut mock = crate::test_utils::MockApiClient::new();
+        mock.expect(
+            "patch-item",
+            response_ok(serde_json::json!({"patched": true})),
+        );
+
+        let params = make_params(&[("id", "1")]);
+        let response = mock.call("patch-item", &params, None).unwrap();
+
+        assert_eq!(response.status, 200);
+        assert_eq!(response.body["patched"], true);
+    }
+
+    #[test]
+    fn test_call_with_mock_post() {
+        let mut mock = crate::test_utils::MockApiClient::new();
+        mock.expect(
+            "create-item",
+            response_ok(serde_json::json!({"created": true})),
+        );
+
+        let body = serde_json::json!({"name": "test"});
+        let response = mock
+            .call("create-item", &make_params(&[]), Some(&body))
+            .unwrap();
+
+        assert_eq!(response.status, 200);
+        assert_eq!(response.body["created"], true);
     }
 }

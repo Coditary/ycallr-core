@@ -86,9 +86,10 @@ impl Command {
 
         let unresolved: Vec<_> = endpoint.matches('{').collect();
         if !unresolved.is_empty() {
-            return Err(crate::YcallrError::ParamValidation(
-                format!("Unresolved parameters in endpoint: {}", endpoint),
-            ));
+            return Err(crate::YcallrError::ParamValidation(format!(
+                "Unresolved parameters in endpoint: {}",
+                endpoint
+            )));
         }
 
         Ok(endpoint)

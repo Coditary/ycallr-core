@@ -2,8 +2,8 @@ use crate::error::{Result, YcallrError};
 use crate::models::ApiDefinition;
 
 pub fn parse_yaml(yaml_content: &str) -> Result<ApiDefinition> {
-    let api: ApiDefinition = serde_yaml::from_str(yaml_content)
-        .map_err(|e| YcallrError::YamlParse(e.to_string()))?;
+    let api: ApiDefinition =
+        serde_yaml::from_str(yaml_content).map_err(|e| YcallrError::YamlParse(e.to_string()))?;
 
     api.validate()?;
 
@@ -107,5 +107,35 @@ commands:
         let cmd = api.commands.get("test").unwrap();
         assert!(cmd.headers.is_empty());
         assert!(cmd.params.is_empty());
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn test_parse_yaml_file_valid() {
+        let dir = tempfile::tempdir().unwrap();
+        let file_path = dir.path().join("test.yaml");
+        std::fs::write(&file_path, VALID_YAML).unwrap();
+
+        let api = parse_yaml_file(&file_path).unwrap();
+        assert_eq!(api.name, "github");
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn test_parse_yaml_file_not_found() {
+        let path = std::path::Path::new("/nonexistent/path/test.yaml");
+        let result = parse_yaml_file(path);
+        assert!(result.is_err());
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn test_parse_yaml_file_invalid_content() {
+        let dir = tempfile::tempdir().unwrap();
+        let file_path = dir.path().join("bad.yaml");
+        std::fs::write(&file_path, "not: valid: yaml: {{{").unwrap();
+
+        let result = parse_yaml_file(&file_path);
+        assert!(result.is_err());
     }
 }

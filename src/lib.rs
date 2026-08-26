@@ -1,5 +1,5 @@
-pub mod models;
 pub mod error;
+pub mod models;
 
 #[cfg(feature = "yaml")]
 pub mod yaml_parser;
@@ -24,8 +24,8 @@ mod proto {
     include!(concat!(env!("OUT_DIR"), "/ycallr.rs"));
 }
 
+pub use error::{Result, YcallrError};
 pub use models::*;
-pub use error::{YcallrError, Result};
 
 #[cfg(feature = "client")]
-pub use client::{YcallrClient, ApiResponse, ApiError, AuthConfig};
+pub use client::{ApiError, ApiResponse, AuthConfig, YcallrClient};

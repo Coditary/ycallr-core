@@ -26,3 +26,21 @@ pub enum YcallrError {
 }
 
 pub type Result<T> = std::result::Result<T, YcallrError>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_error_display() {
+        let err = YcallrError::HttpClient("connection refused".to_string());
+        assert_eq!(err.to_string(), "HTTP client error: connection refused");
+    }
+
+    #[test]
+    fn test_error_from_io() {
+        let io_err = std::io::Error::new(std::io::ErrorKind::NotFound, "file not found");
+        let err: YcallrError = io_err.into();
+        assert!(matches!(err, YcallrError::Io(_)));
+    }
+}

@@ -1,5 +1,9 @@
+#![cfg(not(target_arch = "wasm32"))]
+
 use std::collections::HashMap;
-use ycallr_core::{ApiDefinition, Command, HttpMethod, Parameter, ParamType, YcallrClient, AuthConfig};
+use ycallr_core::{
+    ApiDefinition, AuthConfig, Command, HttpMethod, ParamType, Parameter, YcallrClient,
+};
 
 fn create_test_api(base_url: &str) -> ApiDefinition {
     let mut commands = HashMap::new();
@@ -71,7 +75,8 @@ fn create_test_api(base_url: &str) -> ApiDefinition {
 fn test_get_request() {
     let mut server = mockito::Server::new();
 
-    let mock = server.mock("GET", "/repos/rust-lang/rust")
+    let mock = server
+        .mock("GET", "/repos/rust-lang/rust")
         .with_status(200)
         .with_header("content-type", "application/json")
         .with_body(r#"{"name": "rust", "stars": 90000}"#)
@@ -96,7 +101,8 @@ fn test_get_request() {
 fn test_post_request_with_body() {
     let mut server = mockito::Server::new();
 
-    let mock = server.mock("POST", "/repos/rust-lang/rust/issues")
+    let mock = server
+        .mock("POST", "/repos/rust-lang/rust/issues")
         .with_status(201)
         .with_header("content-type", "application/json")
         .with_body(r#"{"id": 1, "title": "Test Issue"}"#)
@@ -121,7 +127,8 @@ fn test_post_request_with_body() {
 fn test_auth_bearer() {
     let mut server = mockito::Server::new();
 
-    let mock = server.mock("GET", "/repos/rust-lang/rust")
+    let mock = server
+        .mock("GET", "/repos/rust-lang/rust")
         .match_header("Authorization", "Bearer test-token-123")
         .with_status(200)
         .with_header("content-type", "application/json")
@@ -129,10 +136,8 @@ fn test_auth_bearer() {
         .create();
 
     let api = create_test_api(&server.url());
-    let client = YcallrClient::with_auth(
-        api,
-        AuthConfig::Bearer("test-token-123".to_string()),
-    ).unwrap();
+    let client =
+        YcallrClient::with_auth(api, AuthConfig::Bearer("test-token-123".to_string())).unwrap();
 
     let mut params = HashMap::new();
     params.insert("owner".to_string(), "rust-lang".to_string());
@@ -148,7 +153,8 @@ fn test_auth_bearer() {
 fn test_auth_api_key() {
     let mut server = mockito::Server::new();
 
-    let mock = server.mock("GET", "/repos/rust-lang/rust")
+    let mock = server
+        .mock("GET", "/repos/rust-lang/rust")
         .match_header("X-API-Key", "my-secret-key")
         .with_status(200)
         .with_header("content-type", "application/json")
@@ -162,7 +168,8 @@ fn test_auth_api_key() {
             key: "my-secret-key".to_string(),
             header: "X-API-Key".to_string(),
         },
-    ).unwrap();
+    )
+    .unwrap();
 
     let mut params = HashMap::new();
     params.insert("owner".to_string(), "rust-lang".to_string());
@@ -178,7 +185,8 @@ fn test_auth_api_key() {
 fn test_error_response() {
     let mut server = mockito::Server::new();
 
-    let mock = server.mock("GET", "/repos/rust-lang/missing")
+    let mock = server
+        .mock("GET", "/repos/rust-lang/missing")
         .with_status(404)
         .with_header("content-type", "application/json")
         .with_body(r#"{"message": "Not Found"}"#)

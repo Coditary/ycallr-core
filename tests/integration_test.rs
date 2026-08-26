@@ -1,3 +1,5 @@
+#![cfg(not(target_arch = "wasm32"))]
+
 use std::collections::HashMap;
 use ycallr_core::{ApiDefinition, HttpMethod, ParamType};
 
@@ -145,10 +147,22 @@ commands:
     let api = ycallr_core::yaml_parser::parse_yaml(yaml).unwrap();
     let cmd = api.commands.get("test").unwrap();
 
-    assert_eq!(cmd.params.get("str_param").unwrap().param_type, ParamType::String);
-    assert_eq!(cmd.params.get("num_param").unwrap().param_type, ParamType::Number);
-    assert_eq!(cmd.params.get("bool_param").unwrap().param_type, ParamType::Boolean);
-    assert_eq!(cmd.params.get("arr_param").unwrap().param_type, ParamType::Array);
+    assert_eq!(
+        cmd.params.get("str_param").unwrap().param_type,
+        ParamType::String
+    );
+    assert_eq!(
+        cmd.params.get("num_param").unwrap().param_type,
+        ParamType::Number
+    );
+    assert_eq!(
+        cmd.params.get("bool_param").unwrap().param_type,
+        ParamType::Boolean
+    );
+    assert_eq!(
+        cmd.params.get("arr_param").unwrap().param_type,
+        ParamType::Array
+    );
 }
 
 #[test]
@@ -177,9 +191,24 @@ commands:
 
     let api = ycallr_core::yaml_parser::parse_yaml(yaml).unwrap();
 
-    assert_eq!(api.commands.get("get_test").unwrap().method, HttpMethod::GET);
-    assert_eq!(api.commands.get("post_test").unwrap().method, HttpMethod::POST);
-    assert_eq!(api.commands.get("put_test").unwrap().method, HttpMethod::PUT);
-    assert_eq!(api.commands.get("delete_test").unwrap().method, HttpMethod::DELETE);
-    assert_eq!(api.commands.get("patch_test").unwrap().method, HttpMethod::PATCH);
+    assert_eq!(
+        api.commands.get("get_test").unwrap().method,
+        HttpMethod::GET
+    );
+    assert_eq!(
+        api.commands.get("post_test").unwrap().method,
+        HttpMethod::POST
+    );
+    assert_eq!(
+        api.commands.get("put_test").unwrap().method,
+        HttpMethod::PUT
+    );
+    assert_eq!(
+        api.commands.get("delete_test").unwrap().method,
+        HttpMethod::DELETE
+    );
+    assert_eq!(
+        api.commands.get("patch_test").unwrap().method,
+        HttpMethod::PATCH
+    );
 }

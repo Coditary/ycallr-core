@@ -1,6 +1,6 @@
-use std::collections::HashMap;
-use crate::models::{ApiDefinition, Command, HttpMethod, Parameter, ParamType};
 use crate::client::ApiResponse;
+use crate::models::{ApiDefinition, Command, HttpMethod, ParamType, Parameter};
+use std::collections::HashMap;
 
 pub struct MockApiClient {
     responses: HashMap<String, ApiResponse>,
@@ -84,7 +84,10 @@ pub fn github_api() -> ApiDefinition {
     );
 
     let mut get_repo_headers = HashMap::new();
-    get_repo_headers.insert("Accept".to_string(), "application/vnd.github.v3+json".to_string());
+    get_repo_headers.insert(
+        "Accept".to_string(),
+        "application/vnd.github.v3+json".to_string(),
+    );
 
     commands.insert(
         "get-repo".to_string(),
@@ -123,7 +126,10 @@ pub fn github_api() -> ApiDefinition {
     );
 
     let mut create_issue_headers = HashMap::new();
-    create_issue_headers.insert("Accept".to_string(), "application/vnd.github.v3+json".to_string());
+    create_issue_headers.insert(
+        "Accept".to_string(),
+        "application/vnd.github.v3+json".to_string(),
+    );
     create_issue_headers.insert("Content-Type".to_string(), "application/json".to_string());
 
     commands.insert(
@@ -163,7 +169,10 @@ pub fn github_api() -> ApiDefinition {
     );
 
     let mut list_issues_headers = HashMap::new();
-    list_issues_headers.insert("Accept".to_string(), "application/vnd.github.v3+json".to_string());
+    list_issues_headers.insert(
+        "Accept".to_string(),
+        "application/vnd.github.v3+json".to_string(),
+    );
 
     commands.insert(
         "list-issues".to_string(),
@@ -253,7 +262,11 @@ pub fn response_not_found() -> ApiResponse {
     }
 }
 
-pub fn response_with_headers(status: u16, headers: HashMap<String, String>, body: serde_json::Value) -> ApiResponse {
+pub fn response_with_headers(
+    status: u16,
+    headers: HashMap<String, String>,
+    body: serde_json::Value,
+) -> ApiResponse {
     ApiResponse {
         status,
         headers,
@@ -262,7 +275,10 @@ pub fn response_with_headers(status: u16, headers: HashMap<String, String>, body
 }
 
 pub fn make_params(pairs: &[(&str, &str)]) -> HashMap<String, String> {
-    pairs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect()
+    pairs
+        .iter()
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect()
 }
 
 #[cfg(test)]
@@ -353,5 +369,27 @@ mod tests {
 
         let not_found = response_not_found();
         assert_eq!(not_found.status, 404);
+
+        let mut headers = HashMap::new();
+        headers.insert("X-Custom".to_string(), "value".to_string());
+        let with_headers = response_with_headers(200, headers, serde_json::json!({"data": 1}));
+        assert_eq!(with_headers.status, 200);
+        assert_eq!(with_headers.headers.get("X-Custom").unwrap(), "value");
+    }
+
+    #[test]
+    fn test_mock_client_calls_method() {
+        let mut mock = MockApiClient::new();
+        mock.expect("get-item", response_ok(serde_json::json!({})));
+        mock.expect("create-item", response_ok(serde_json::json!({})));
+
+        let params = make_params(&[("id", "1")]);
+        mock.call("get-item", &params, None).unwrap();
+        mock.call("create-item", &params, None).unwrap();
+
+        let calls = mock.calls();
+        assert_eq!(calls.len(), 2);
+        assert_eq!(calls[0].command, "get-item");
+        assert_eq!(calls[1].command, "create-item");
     }
 }
