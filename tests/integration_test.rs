@@ -412,6 +412,100 @@ fn test_env_protobuf_roundtrip() {
     );
 }
 
+const BODY_YAML: &str = r#"
+name: body-api
+version: "1.0.0"
+description: API with body
+base_url: https://api.test.com
+commands:
+  create-issue:
+    endpoint: /repos/{owner}/{repo}/issues
+    method: POST
+    params:
+      owner:
+        description: Repository owner
+        type: string
+        required: true
+      repo:
+        description: Repository name
+        type: string
+        required: true
+    body:
+      json:
+        owner_id: "{owner}"
+        issue_title: "Issue in {repo}"
+        labels:
+          - bug
+          - urgent
+"#;
+
+#[test]
+fn test_body_yaml_parsing() {
+    let api = ycallr_core::yaml_parser::parse_yaml(BODY_YAML).unwrap();
+    let cmd = api.commands.get("create-issue").unwrap();
+    let body = cmd.body.as_ref().unwrap();
+    let json = body.json.as_ref().unwrap();
+
+    assert!(json.is_object());
+    assert_eq!(json["owner_id"], "{owner}");
+    assert_eq!(json["issue_title"], "Issue in {repo}");
+    assert_eq!(json["labels"][0], "bug");
+    assert_eq!(json["labels"][1], "urgent");
+}
+
+#[test]
+fn test_body_protobuf_roundtrip() {
+    let api = ycallr_core::yaml_parser::parse_yaml(BODY_YAML).unwrap();
+    let proto_bytes = api.to_proto_bytes().unwrap();
+    let restored = ApiDefinition::from_proto_bytes(&proto_bytes).unwrap();
+
+    let cmd = restored.commands.get("create-issue").unwrap();
+    let body = cmd.body.as_ref().unwrap();
+    let json = body.json.as_ref().unwrap();
+
+    assert!(json.is_object());
+    assert_eq!(json["owner_id"], "{owner}");
+    assert_eq!(json["issue_title"], "Issue in {repo}");
+    assert_eq!(json["labels"][0], "bug");
+    assert_eq!(json["labels"][1], "urgent");
+}
+
+#[test]
+fn test_body_template_resolution() {
+    let api = ycallr_core::yaml_parser::parse_yaml(BODY_YAML).unwrap();
+    let json = api
+        .commands
+        .get("create-issue")
+        .unwrap()
+        .body
+        .as_ref()
+        .unwrap()
+        .json
+        .as_ref()
+        .unwrap()
+        .clone();
+
+    let mut params = HashMap::new();
+    params.insert("owner".to_string(), "rust-lang".to_string());
+    params.insert("repo".to_string(), "rust".to_string());
+
+    let client = ycallr_core::YcallrClient::new(api).unwrap();
+    let resolved = client.resolve_json_templates(&json, &params).unwrap();
+
+    assert_eq!(resolved["owner_id"], "rust-lang");
+    assert_eq!(resolved["issue_title"], "Issue in rust");
+    assert_eq!(resolved["labels"][0], "bug");
+    assert_eq!(resolved["labels"][1], "urgent");
+}
+
+#[test]
+fn test_body_json_contains_template_vars() {
+    let api = ycallr_core::yaml_parser::parse_yaml(BODY_YAML).unwrap();
+    let json_str = serde_json::to_string(&api).unwrap();
+    assert!(json_str.contains("{owner}"));
+    assert!(json_str.contains("Issue in {repo}"));
+}
+
 #[test]
 fn test_description_yaml_parsing() {
     let api = ycallr_core::yaml_parser::parse_yaml(DESCRIPTION_YAML).unwrap();

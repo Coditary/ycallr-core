@@ -100,6 +100,7 @@ pub fn github_api() -> ApiDefinition {
             headers: get_repo_headers,
             params: get_repo_params,
             commands: None,
+            body: None,
             responses: None,
         },
     );
@@ -146,6 +147,7 @@ pub fn github_api() -> ApiDefinition {
             headers: create_issue_headers,
             params: create_issue_params,
             commands: None,
+            body: None,
             responses: None,
         },
     );
@@ -191,6 +193,7 @@ pub fn github_api() -> ApiDefinition {
             headers: list_issues_headers,
             params: list_issues_params,
             commands: None,
+            body: None,
             responses: None,
         },
     );
@@ -230,6 +233,7 @@ pub fn simple_api() -> ApiDefinition {
             headers,
             params,
             commands: None,
+            body: None,
             responses: None,
         },
     );
@@ -243,6 +247,7 @@ pub fn simple_api() -> ApiDefinition {
             headers: HashMap::new(),
             params: HashMap::new(),
             commands: None,
+            body: None,
             responses: None,
         },
     );
@@ -272,6 +277,7 @@ pub fn nested_github_api() -> ApiDefinition {
             headers: HashMap::new(),
             params: HashMap::new(),
             commands: None,
+            body: None,
             responses: None,
         },
     );
@@ -284,6 +290,7 @@ pub fn nested_github_api() -> ApiDefinition {
             headers: HashMap::new(),
             params: HashMap::new(),
             commands: None,
+            body: None,
             responses: None,
         },
     );
@@ -297,6 +304,7 @@ pub fn nested_github_api() -> ApiDefinition {
             headers: HashMap::new(),
             params: HashMap::new(),
             commands: Some(issues_commands),
+            body: None,
             responses: None,
         },
     );
@@ -310,6 +318,7 @@ pub fn nested_github_api() -> ApiDefinition {
             headers: HashMap::new(),
             params: HashMap::new(),
             commands: None,
+            body: None,
             responses: None,
         },
     );
@@ -323,6 +332,7 @@ pub fn nested_github_api() -> ApiDefinition {
             headers: HashMap::new(),
             params: HashMap::new(),
             commands: Some(repos_commands),
+            body: None,
             responses: None,
         },
     );
@@ -337,6 +347,7 @@ pub fn nested_github_api() -> ApiDefinition {
             headers: HashMap::new(),
             params: HashMap::new(),
             commands: None,
+            body: None,
             responses: None,
         },
     );
@@ -350,6 +361,7 @@ pub fn nested_github_api() -> ApiDefinition {
             headers: HashMap::new(),
             params: HashMap::new(),
             commands: Some(users_commands),
+            body: None,
             responses: None,
         },
     );
@@ -389,6 +401,7 @@ pub fn env_api() -> ApiDefinition {
             headers,
             params: HashMap::new(),
             commands: None,
+            body: None,
             responses: None,
         },
     );
@@ -423,6 +436,7 @@ pub fn response_api() -> ApiDefinition {
             method: Some(HttpMethod::POST),
             headers: HashMap::new(),
             params: HashMap::new(),
+            body: None,
             commands: None,
             responses: Some(ResponseConfig {
                 success: Some(ResponseEntry {

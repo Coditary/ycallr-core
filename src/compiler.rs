@@ -1,6 +1,7 @@
 use crate::error::{Result, YcallrError};
 use crate::models::{
-    ApiDefinition, Command, EnvVar, HttpMethod, ParamType, Parameter, ResponseConfig, ResponseEntry,
+    ApiDefinition, BodyConfig, Command, EnvVar, HttpMethod, ParamType, Parameter, ResponseConfig,
+    ResponseEntry,
 };
 use crate::proto;
 use prost::Message;
@@ -65,6 +66,7 @@ impl Compiler {
                 .map(|(k, v)| (k.clone(), Self::param_to_proto(v)))
                 .collect(),
             commands,
+            body: cmd.body.as_ref().map(Self::body_to_proto),
             responses: cmd.responses.as_ref().map(Self::response_config_to_proto),
         }
     }
@@ -86,6 +88,7 @@ impl Compiler {
             method: cmd.method.map(|m| Self::method_from_i32(m)),
             headers: cmd.headers.clone(),
             params,
+            body: cmd.body.as_ref().map(Self::body_from_proto),
             responses: cmd.responses.as_ref().map(Self::response_config_from_proto),
             commands: if commands.is_empty() {
                 None
@@ -130,6 +133,21 @@ impl Compiler {
     fn response_entry_from_proto(entry: &proto::ResponseEntry) -> ResponseEntry {
         ResponseEntry {
             message: entry.message.clone(),
+        }
+    }
+
+    fn body_to_proto(body: &BodyConfig) -> proto::BodyConfig {
+        proto::BodyConfig {
+            json: body.json.as_ref().map(|v| v.to_string()),
+        }
+    }
+
+    fn body_from_proto(body: &proto::BodyConfig) -> BodyConfig {
+        BodyConfig {
+            json: body
+                .json
+                .as_ref()
+                .and_then(|s| serde_json::from_str(s).ok()),
         }
     }
 
@@ -243,6 +261,7 @@ mod tests {
                 method: Some(HttpMethod::POST),
                 headers,
                 params,
+                body: None,
                 responses: None,
                 commands: None,
             },
@@ -272,6 +291,7 @@ mod tests {
                 method: Some(HttpMethod::POST),
                 headers: HashMap::new(),
                 params: HashMap::new(),
+                body: None,
                 responses: None,
                 commands: None,
             },
@@ -285,6 +305,7 @@ mod tests {
                 method: Some(HttpMethod::GET),
                 headers: HashMap::new(),
                 params: HashMap::new(),
+                body: None,
                 responses: None,
                 commands: Some(issues_commands),
             },
@@ -298,6 +319,7 @@ mod tests {
                 method: Some(HttpMethod::GET),
                 headers: HashMap::new(),
                 params: HashMap::new(),
+                body: None,
                 responses: None,
                 commands: Some(repos_commands),
             },
@@ -333,6 +355,7 @@ mod tests {
                 method: Some(HttpMethod::GET),
                 headers,
                 params: HashMap::new(),
+                body: None,
                 responses: None,
                 commands: None,
             },
@@ -386,6 +409,7 @@ mod tests {
                 method: Some(HttpMethod::GET),
                 headers: HashMap::new(),
                 params,
+                body: None,
                 responses: Some(ResponseConfig {
                     success: Some(ResponseEntry {
                         message: "Got repo {output.name}".to_string(),

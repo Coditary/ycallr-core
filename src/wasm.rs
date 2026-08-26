@@ -74,6 +74,25 @@ impl YcallrApi {
             .map(|e| e.message.clone())
     }
 
+    #[wasm_bindgen(js_name = commandHasBody)]
+    pub fn command_has_body(&self, name: &str) -> bool {
+        self.inner
+            .get_command(name)
+            .ok()
+            .and_then(|cmd| cmd.body.as_ref())
+            .is_some()
+    }
+
+    #[wasm_bindgen(js_name = commandBodyJson)]
+    pub fn command_body_json(&self, name: &str) -> Option<String> {
+        self.inner
+            .get_command(name)
+            .ok()
+            .and_then(|cmd| cmd.body.as_ref())
+            .and_then(|b| b.json.as_ref())
+            .map(|v| v.to_string())
+    }
+
     pub fn to_json(&self) -> std::result::Result<String, JsValue> {
         serde_json::to_string_pretty(&self.inner).map_err(|e| JsValue::from_str(&e.to_string()))
     }
@@ -180,6 +199,30 @@ commands:
         message: "Failed to create item"
       404:
         message: "{input.owner} not found"
+"#;
+
+    const BODY_YAML: &str = r#"
+name: body-api
+version: "1.0.0"
+description: API with body
+base_url: https://api.test.com
+commands:
+  create-issue:
+    endpoint: /repos/{owner}/{repo}/issues
+    method: POST
+    params:
+      owner:
+        description: Repository owner
+        type: string
+        required: true
+      repo:
+        description: Repository name
+        type: string
+        required: true
+    body:
+      json:
+        owner_id: "{owner}"
+        issue_title: "{title}"
 "#;
 
     #[wasm_bindgen_test]
@@ -313,5 +356,30 @@ commands:
         let json = api.to_json().unwrap();
         assert!(json.contains("Created {output.name}"));
         assert!(json.contains("Failed to create item"));
+    }
+
+    #[wasm_bindgen_test]
+    fn test_wasm_command_has_body() {
+        let api = YcallrApi::new(BODY_YAML).unwrap();
+        assert!(api.command_has_body("create-issue"));
+        assert!(!api.command_has_body("nonexistent"));
+    }
+
+    #[wasm_bindgen_test]
+    fn test_wasm_command_body_json() {
+        let api = YcallrApi::new(BODY_YAML).unwrap();
+        let body = api.command_body_json("create-issue").unwrap();
+        assert!(body.contains("owner_id"));
+        assert!(body.contains("{owner}"));
+        assert!(body.contains("issue_title"));
+        assert!(body.contains("{title}"));
+    }
+
+    #[wasm_bindgen_test]
+    fn test_wasm_body_yaml_in_json() {
+        let api = YcallrApi::new(BODY_YAML).unwrap();
+        let json = api.to_json().unwrap();
+        assert!(json.contains("owner_id"));
+        assert!(json.contains("{owner}"));
     }
 }

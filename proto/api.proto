@@ -21,6 +21,7 @@ message Command {
   map<string, string> headers = 3;
   map<string, Parameter> params = 4;
   map<string, Command> commands = 5;
+  optional BodyConfig body = 8;
   optional ResponseConfig responses = 7;
 }
 
@@ -33,6 +34,10 @@ message ResponseConfig {
 
 message ResponseEntry {
   string message = 1;
+}
+
+message BodyConfig {
+  optional string json = 1;
 }
 
 message EnvVar {

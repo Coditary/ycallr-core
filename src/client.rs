@@ -206,6 +206,50 @@ impl YcallrClient {
         result
     }
 
+    fn resolve_body_templates(
+        &self,
+        body_config: &crate::models::BodyConfig,
+        params: &HashMap<String, String>,
+    ) -> Result<serde_json::Value> {
+        if let Some(json) = &body_config.json {
+            let resolved = self.resolve_json_templates(json, params)?;
+            Ok(resolved)
+        } else {
+            Ok(serde_json::Value::Null)
+        }
+    }
+
+    pub fn resolve_json_templates(
+        &self,
+        value: &serde_json::Value,
+        params: &HashMap<String, String>,
+    ) -> Result<serde_json::Value> {
+        match value {
+            serde_json::Value::String(s) => {
+                let mut resolved = s.clone();
+                for (key, val) in params {
+                    resolved = resolved.replace(&format!("{{{}}}", key), val);
+                }
+                Ok(serde_json::Value::String(resolved))
+            }
+            serde_json::Value::Array(arr) => {
+                let mut resolved = Vec::new();
+                for item in arr {
+                    resolved.push(self.resolve_json_templates(item, params)?);
+                }
+                Ok(serde_json::Value::Array(resolved))
+            }
+            serde_json::Value::Object(map) => {
+                let mut resolved = serde_json::Map::new();
+                for (k, v) in map {
+                    resolved.insert(k.clone(), self.resolve_json_templates(v, params)?);
+                }
+                Ok(serde_json::Value::Object(resolved))
+            }
+            other => Ok(other.clone()),
+        }
+    }
+
     pub fn call(
         &self,
         command: &str,
@@ -251,7 +295,20 @@ impl YcallrClient {
             }
         }
 
-        if let Some(body) = body {
+        let final_body = if let Some(caller_body) = body {
+            Some(caller_body.clone())
+        } else if let Some(body_config) = &cmd.body {
+            let resolved_body = self.resolve_body_templates(body_config, params)?;
+            if resolved_body.is_null() {
+                None
+            } else {
+                Some(resolved_body)
+            }
+        } else {
+            None
+        };
+
+        if let Some(body) = &final_body {
             request = request.json(body);
         }
 
@@ -339,6 +396,7 @@ mod tests {
                 method: Some(HttpMethod::GET),
                 headers,
                 params,
+                body: None,
                 responses: None,
                 commands: None,
             },
@@ -365,6 +423,7 @@ mod tests {
                 method: Some(HttpMethod::POST),
                 headers: create_headers,
                 params: create_params,
+                body: None,
                 responses: None,
                 commands: None,
             },
@@ -418,6 +477,7 @@ mod tests {
                 method: Some(HttpMethod::GET),
                 headers: HashMap::new(),
                 params,
+                body: None,
                 responses: Some(ResponseConfig {
                     success: Some(ResponseEntry {
                         message: "Got repo {output.name}".to_string(),
@@ -456,6 +516,7 @@ mod tests {
                 method: Some(HttpMethod::POST),
                 headers: HashMap::new(),
                 params: HashMap::new(),
+                body: None,
                 responses: None,
                 commands: None,
             },
@@ -468,6 +529,7 @@ mod tests {
                 method: Some(HttpMethod::GET),
                 headers: HashMap::new(),
                 params: HashMap::new(),
+                body: None,
                 responses: None,
                 commands: None,
             },
@@ -481,6 +543,7 @@ mod tests {
                 method: Some(HttpMethod::GET),
                 headers: HashMap::new(),
                 params: HashMap::new(),
+                body: None,
                 responses: None,
                 commands: Some(issues_commands),
             },
@@ -494,6 +557,7 @@ mod tests {
                 method: Some(HttpMethod::GET),
                 headers: HashMap::new(),
                 params: HashMap::new(),
+                body: None,
                 responses: None,
                 commands: Some(repos_commands),
             },
@@ -526,6 +590,7 @@ mod tests {
                 method: Some(HttpMethod::GET),
                 headers,
                 params: HashMap::new(),
+                body: None,
                 responses: None,
                 commands: None,
             },
@@ -851,6 +916,7 @@ mod client_integration_tests {
                 method: Some(HttpMethod::GET),
                 headers: HashMap::new(),
                 params,
+                body: None,
                 responses: Some(ResponseConfig {
                     success: Some(ResponseEntry {
                         message: "Got repo {output.name}".to_string(),

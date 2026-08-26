@@ -25,6 +25,12 @@ fn default_true() -> bool {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct BodyConfig {
+    #[serde(default)]
+    pub json: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Command {
     #[serde(default)]
     pub description: Option<String>,
@@ -36,6 +42,8 @@ pub struct Command {
     pub headers: HashMap<String, String>,
     #[serde(default)]
     pub params: HashMap<String, Parameter>,
+    #[serde(default)]
+    pub body: Option<BodyConfig>,
     #[serde(default)]
     pub responses: Option<ResponseConfig>,
     #[serde(default)]
@@ -242,6 +250,7 @@ mod tests {
                 method: Some(HttpMethod::POST),
                 headers,
                 params,
+                body: None,
                 responses: None,
                 commands: None,
             },
@@ -271,6 +280,7 @@ mod tests {
                 method: Some(HttpMethod::POST),
                 headers: HashMap::new(),
                 params: HashMap::new(),
+                body: None,
                 responses: None,
                 commands: None,
             },
@@ -283,6 +293,7 @@ mod tests {
                 method: Some(HttpMethod::GET),
                 headers: HashMap::new(),
                 params: HashMap::new(),
+                body: None,
                 responses: None,
                 commands: None,
             },
@@ -296,6 +307,7 @@ mod tests {
                 method: Some(HttpMethod::GET),
                 headers: HashMap::new(),
                 params: HashMap::new(),
+                body: None,
                 responses: None,
                 commands: Some(issues_commands),
             },
@@ -309,6 +321,7 @@ mod tests {
                 method: Some(HttpMethod::GET),
                 headers: HashMap::new(),
                 params: HashMap::new(),
+                body: None,
                 responses: None,
                 commands: Some(repos_commands),
             },
@@ -414,6 +427,7 @@ mod tests {
             method: Some(HttpMethod::POST),
             headers: HashMap::new(),
             params: HashMap::new(),
+            body: None,
             responses: None,
             commands: None,
         };
@@ -434,6 +448,7 @@ mod tests {
             method: Some(HttpMethod::POST),
             headers: HashMap::new(),
             params: HashMap::new(),
+            body: None,
             responses: None,
             commands: None,
         };
@@ -451,6 +466,7 @@ mod tests {
             method: None,
             headers: HashMap::new(),
             params: HashMap::new(),
+            body: None,
             responses: None,
             commands: Some(HashMap::new()),
         };
@@ -477,6 +493,7 @@ mod tests {
             method: Some(HttpMethod::GET),
             headers: HashMap::new(),
             params: HashMap::new(),
+            body: None,
             responses: None,
             commands: None,
         };
@@ -488,6 +505,7 @@ mod tests {
             method: None,
             headers: HashMap::new(),
             params: HashMap::new(),
+            body: None,
             responses: None,
             commands: Some(HashMap::new()),
         };
@@ -505,6 +523,7 @@ mod tests {
                 method: Some(HttpMethod::GET),
                 headers: HashMap::new(),
                 params: HashMap::new(),
+                body: None,
                 responses: None,
                 commands: None,
             },
@@ -515,6 +534,7 @@ mod tests {
             method: None,
             headers: HashMap::new(),
             params: HashMap::new(),
+            body: None,
             responses: None,
             commands: Some(sub_commands),
         };
@@ -526,6 +546,7 @@ mod tests {
             method: Some(HttpMethod::GET),
             headers: HashMap::new(),
             params: HashMap::new(),
+            body: None,
             responses: None,
             commands: None,
         };
