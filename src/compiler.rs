@@ -1,5 +1,5 @@
 use crate::error::{Result, YcallrError};
-use crate::models::{ApiDefinition, Command, HttpMethod, ParamType, Parameter};
+use crate::models::{ApiDefinition, Command, EnvVar, HttpMethod, ParamType, Parameter};
 use crate::proto;
 use prost::Message;
 
@@ -17,6 +17,7 @@ impl Compiler {
                 .iter()
                 .map(|(k, v)| (k.clone(), Self::command_to_proto(v)))
                 .collect(),
+            env: api.env.iter().map(Self::env_to_proto).collect(),
         };
 
         Ok(proto_api.encode_to_vec())
@@ -31,11 +32,14 @@ impl Compiler {
             commands.insert(k, Self::command_from_proto(&v)?);
         }
 
+        let env = proto_api.env.iter().map(Self::env_from_proto).collect();
+
         Ok(ApiDefinition {
             name: proto_api.name,
             version: proto_api.version,
             description: proto_api.description,
             base_url: proto_api.base_url,
+            env,
             commands,
         })
     }
@@ -49,6 +53,7 @@ impl Compiler {
         }
 
         proto::Command {
+            description: cmd.description.clone(),
             endpoint: cmd.endpoint.clone(),
             method: cmd.method.as_ref().map(|m| Self::method_to_proto(m) as i32),
             headers: cmd.headers.clone(),
@@ -73,6 +78,7 @@ impl Compiler {
         }
 
         Ok(Command {
+            description: cmd.description.clone(),
             endpoint: cmd.endpoint.clone(),
             method: cmd.method.map(|m| Self::method_from_i32(m)),
             headers: cmd.headers.clone(),
@@ -83,6 +89,20 @@ impl Compiler {
                 Some(commands)
             },
         })
+    }
+
+    fn env_to_proto(env: &EnvVar) -> proto::EnvVar {
+        proto::EnvVar {
+            name: env.name.clone(),
+            required: env.required,
+        }
+    }
+
+    fn env_from_proto(env: &proto::EnvVar) -> EnvVar {
+        EnvVar {
+            name: env.name.clone(),
+            required: env.required,
+        }
     }
 
     fn method_to_proto(method: &HttpMethod) -> proto::HttpMethod {
@@ -176,6 +196,7 @@ mod tests {
         commands.insert(
             "create-issue".to_string(),
             Command {
+                description: Some("Create an issue".to_string()),
                 endpoint: Some("/repos/{owner}/{repo}/issues".to_string()),
                 method: Some(HttpMethod::POST),
                 headers,
@@ -189,6 +210,7 @@ mod tests {
             version: "1.0.0".to_string(),
             description: "GitHub API".to_string(),
             base_url: "https://api.github.com".to_string(),
+            env: vec![],
             commands,
         }
     }
@@ -202,6 +224,7 @@ mod tests {
         issues_commands.insert(
             "create".to_string(),
             Command {
+                description: Some("Create an issue".to_string()),
                 endpoint: Some("/repos/{owner}/{repo}/issues".to_string()),
                 method: Some(HttpMethod::POST),
                 headers: HashMap::new(),
@@ -213,6 +236,7 @@ mod tests {
         repos_commands.insert(
             "issues".to_string(),
             Command {
+                description: Some("Issues operations".to_string()),
                 endpoint: Some("/repos/{owner}/{repo}/issues".to_string()),
                 method: Some(HttpMethod::GET),
                 headers: HashMap::new(),
@@ -224,6 +248,7 @@ mod tests {
         commands.insert(
             "repos".to_string(),
             Command {
+                description: Some("Repository operations".to_string()),
                 endpoint: Some("/repos".to_string()),
                 method: Some(HttpMethod::GET),
                 headers: HashMap::new(),
@@ -237,6 +262,50 @@ mod tests {
             version: "1.0.0".to_string(),
             description: "GitHub API".to_string(),
             base_url: "https://api.github.com".to_string(),
+            env: vec![EnvVar {
+                name: "GITHUB_TOKEN".to_string(),
+                required: true,
+            }],
+            commands,
+        }
+    }
+
+    fn create_env_api() -> ApiDefinition {
+        let mut commands = HashMap::new();
+
+        let mut headers = HashMap::new();
+        headers.insert(
+            "Authorization".to_string(),
+            "Bearer ${GITHUB_TOKEN}".to_string(),
+        );
+
+        commands.insert(
+            "get-repo".to_string(),
+            Command {
+                description: Some("Get a repository".to_string()),
+                endpoint: Some("/repos/{owner}/{repo}".to_string()),
+                method: Some(HttpMethod::GET),
+                headers,
+                params: HashMap::new(),
+                commands: None,
+            },
+        );
+
+        ApiDefinition {
+            name: "github".to_string(),
+            version: "1.0.0".to_string(),
+            description: "GitHub API".to_string(),
+            base_url: "https://api.github.com".to_string(),
+            env: vec![
+                EnvVar {
+                    name: "GITHUB_TOKEN".to_string(),
+                    required: true,
+                },
+                EnvVar {
+                    name: "API_VERSION".to_string(),
+                    required: false,
+                },
+            ],
             commands,
         }
     }
@@ -318,5 +387,41 @@ mod tests {
 
         let cmd = restored.get_command("repos.issues.create").unwrap();
         assert_eq!(cmd.method.as_ref().unwrap(), &HttpMethod::POST);
+    }
+
+    #[test]
+    fn test_env_proto_roundtrip() {
+        let api = create_env_api();
+        let proto_bytes = Compiler::yaml_to_proto(&api).unwrap();
+        let restored = Compiler::proto_to_yaml(&proto_bytes).unwrap();
+
+        assert_eq!(restored.env.len(), 2);
+        assert_eq!(restored.env[0].name, "GITHUB_TOKEN");
+        assert!(restored.env[0].required);
+        assert_eq!(restored.env[1].name, "API_VERSION");
+        assert!(!restored.env[1].required);
+    }
+
+    #[test]
+    fn test_env_proto_preserves_substitution() {
+        let api = create_env_api();
+        let proto_bytes = Compiler::yaml_to_proto(&api).unwrap();
+        let restored = Compiler::proto_to_yaml(&proto_bytes).unwrap();
+
+        let cmd = restored.commands.get("get-repo").unwrap();
+        assert_eq!(
+            cmd.headers.get("Authorization").unwrap(),
+            "Bearer ${GITHUB_TOKEN}"
+        );
+    }
+
+    #[test]
+    fn test_description_proto_roundtrip() {
+        let api = create_test_api();
+        let proto_bytes = Compiler::yaml_to_proto(&api).unwrap();
+        let restored = Compiler::proto_to_yaml(&proto_bytes).unwrap();
+
+        let cmd = restored.commands.get("create-issue").unwrap();
+        assert_eq!(cmd.description, Some("Create an issue".to_string()));
     }
 }

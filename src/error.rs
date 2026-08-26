@@ -23,6 +23,9 @@ pub enum YcallrError {
 
     #[error("HTTP client error: {0}")]
     HttpClient(String),
+
+    #[error("Environment variable error: {0}")]
+    EnvVar(String),
 }
 
 pub type Result<T> = std::result::Result<T, YcallrError>;

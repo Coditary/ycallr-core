@@ -11,14 +11,21 @@ message ApiDefinition {
   string description = 3;
   string base_url = 4;
   map<string, Command> commands = 5;
+  repeated EnvVar env = 6;
 }
 
 message Command {
+  optional string description = 6;
   optional string endpoint = 1;
   optional HttpMethod method = 2;
   map<string, string> headers = 3;
   map<string, Parameter> params = 4;
   map<string, Command> commands = 5;
+}
+
+message EnvVar {
+  string name = 1;
+  bool required = 2;
 }
 
 enum HttpMethod {

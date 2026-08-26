@@ -1,5 +1,6 @@
 use crate::error::{Result, YcallrError};
 use crate::models::{ApiDefinition, HttpMethod};
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -7,6 +8,12 @@ use std::collections::HashMap;
 pub enum AuthConfig {
     Bearer(String),
     ApiKey { key: String, header: String },
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum EnvMode {
+    Auto,
+    Manual,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -23,30 +30,142 @@ pub struct ApiError {
     pub body: Option<serde_json::Value>,
 }
 
-pub struct YcallrClient {
+pub struct YcallrClientBuilder {
     api: ApiDefinition,
-    http_client: reqwest::blocking::Client,
     auth: Option<AuthConfig>,
+    env_mode: EnvMode,
+    env_vars: HashMap<String, String>,
 }
 
-impl YcallrClient {
-    pub fn new(api: ApiDefinition) -> Result<Self> {
+impl YcallrClientBuilder {
+    pub fn new(api: ApiDefinition) -> Self {
+        Self {
+            api,
+            auth: None,
+            env_mode: EnvMode::Auto,
+            env_vars: HashMap::new(),
+        }
+    }
+
+    pub fn auth(mut self, auth: AuthConfig) -> Self {
+        self.auth = Some(auth);
+        self
+    }
+
+    pub fn env_mode(mut self, mode: EnvMode) -> Self {
+        self.env_mode = mode;
+        self
+    }
+
+    pub fn env(mut self, key: &str, value: &str) -> Self {
+        self.env_vars.insert(key.to_string(), value.to_string());
+        self
+    }
+
+    pub fn envs(mut self, vars: HashMap<String, String>) -> Self {
+        self.env_vars.extend(vars);
+        self
+    }
+
+    pub fn build(self) -> Result<YcallrClient> {
+        let mut resolved_env = HashMap::new();
+
+        for env_var in &self.api.env {
+            match self.env_mode {
+                EnvMode::Auto => {
+                    if let Ok(val) = std::env::var(&env_var.name) {
+                        resolved_env.insert(env_var.name.clone(), val);
+                    } else if let Some(val) = self.env_vars.get(&env_var.name) {
+                        resolved_env.insert(env_var.name.clone(), val.clone());
+                    }
+                }
+                EnvMode::Manual => {
+                    if let Some(val) = self.env_vars.get(&env_var.name) {
+                        resolved_env.insert(env_var.name.clone(), val.clone());
+                    }
+                }
+            }
+        }
+
+        for (key, value) in &self.env_vars {
+            resolved_env
+                .entry(key.clone())
+                .or_insert_with(|| value.clone());
+        }
+
+        for env_var in &self.api.env {
+            if env_var.required && !resolved_env.contains_key(&env_var.name) {
+                return Err(YcallrError::EnvVar(format!(
+                    "Required environment variable '{}' is not set",
+                    env_var.name
+                )));
+            }
+        }
+
         let http_client = reqwest::blocking::Client::builder()
             .timeout(std::time::Duration::from_secs(30))
             .build()
             .map_err(|e| YcallrError::HttpClient(e.to_string()))?;
 
-        Ok(Self {
-            api,
+        Ok(YcallrClient {
+            api: self.api,
             http_client,
-            auth: None,
+            auth: self.auth,
+            env_mode: self.env_mode,
+            env_vars: resolved_env,
         })
+    }
+}
+
+#[derive(Debug)]
+pub struct YcallrClient {
+    api: ApiDefinition,
+    http_client: reqwest::blocking::Client,
+    auth: Option<AuthConfig>,
+    env_mode: EnvMode,
+    env_vars: HashMap<String, String>,
+}
+
+impl YcallrClient {
+    pub fn new(api: ApiDefinition) -> Result<Self> {
+        Self::builder(api).build()
     }
 
     pub fn with_auth(api: ApiDefinition, auth: AuthConfig) -> Result<Self> {
-        let mut client = Self::new(api)?;
-        client.auth = Some(auth);
-        Ok(client)
+        Self::builder(api).auth(auth).build()
+    }
+
+    pub fn builder(api: ApiDefinition) -> YcallrClientBuilder {
+        YcallrClientBuilder::new(api)
+    }
+
+    pub fn env_mode(&self) -> &EnvMode {
+        &self.env_mode
+    }
+
+    pub fn set_env(&mut self, key: &str, value: &str) {
+        self.env_vars.insert(key.to_string(), value.to_string());
+    }
+
+    pub fn get_env(&self, key: &str) -> Option<&str> {
+        self.env_vars.get(key).map(|s| s.as_str())
+    }
+
+    fn resolve_env_vars(&self, text: &str) -> Result<String> {
+        let re = Regex::new(r"\$\{([^}]+)\}").unwrap();
+        let mut result = text.to_string();
+
+        for cap in re.captures_iter(text) {
+            let var_name = &cap[1];
+            let replacement = self
+                .env_vars
+                .get(var_name)
+                .map(|s| s.as_str())
+                .unwrap_or("");
+            result = result.replace(&cap[0], replacement);
+        }
+
+        Ok(result)
     }
 
     pub fn call(
@@ -58,7 +177,12 @@ impl YcallrClient {
         let cmd = self.api.get_command(command)?;
 
         let endpoint = cmd.resolve_endpoint(params)?;
-        let url = format!("{}{}", self.api.base_url.trim_end_matches('/'), endpoint);
+        let resolved_endpoint = self.resolve_env_vars(&endpoint)?;
+        let url = format!(
+            "{}{}",
+            self.api.base_url.trim_end_matches('/'),
+            resolved_endpoint
+        );
 
         let method = cmd
             .method
@@ -74,7 +198,8 @@ impl YcallrClient {
         };
 
         for (key, value) in &cmd.headers {
-            request = request.header(key.as_str(), value.as_str());
+            let resolved_value = self.resolve_env_vars(value)?;
+            request = request.header(key.as_str(), resolved_value.as_str());
         }
 
         if let Some(auth) = &self.auth {
@@ -156,6 +281,7 @@ mod tests {
         commands.insert(
             "get-repo".to_string(),
             Command {
+                description: None,
                 endpoint: Some("/repos/{owner}/{repo}".to_string()),
                 method: Some(HttpMethod::GET),
                 headers,
@@ -180,6 +306,7 @@ mod tests {
         commands.insert(
             "create-issue".to_string(),
             Command {
+                description: None,
                 endpoint: Some("/repos/{owner}/{repo}/issues".to_string()),
                 method: Some(HttpMethod::POST),
                 headers: create_headers,
@@ -193,6 +320,45 @@ mod tests {
             version: "1.0.0".to_string(),
             description: "GitHub API".to_string(),
             base_url: "https://api.github.com".to_string(),
+            env: vec![],
+            commands,
+        }
+    }
+
+    fn create_env_api() -> ApiDefinition {
+        let mut commands = HashMap::new();
+
+        let mut headers = HashMap::new();
+        headers.insert(
+            "Authorization".to_string(),
+            "Bearer ${GITHUB_TOKEN}".to_string(),
+        );
+        headers.insert(
+            "Accept".to_string(),
+            "application/vnd.github+json".to_string(),
+        );
+
+        commands.insert(
+            "get-repo".to_string(),
+            Command {
+                description: Some("Get a repository".to_string()),
+                endpoint: Some("/repos/{owner}/{repo}".to_string()),
+                method: Some(HttpMethod::GET),
+                headers,
+                params: HashMap::new(),
+                commands: None,
+            },
+        );
+
+        ApiDefinition {
+            name: "github".to_string(),
+            version: "1.0.0".to_string(),
+            description: "GitHub API".to_string(),
+            base_url: "https://api.github.com".to_string(),
+            env: vec![crate::models::EnvVar {
+                name: "GITHUB_TOKEN".to_string(),
+                required: true,
+            }],
             commands,
         }
     }
@@ -206,6 +372,7 @@ mod tests {
         issues_commands.insert(
             "create".to_string(),
             Command {
+                description: None,
                 endpoint: Some("/repos/{owner}/{repo}/issues".to_string()),
                 method: Some(HttpMethod::POST),
                 headers: HashMap::new(),
@@ -216,6 +383,7 @@ mod tests {
         issues_commands.insert(
             "list".to_string(),
             Command {
+                description: None,
                 endpoint: Some("/repos/{owner}/{repo}/issues".to_string()),
                 method: Some(HttpMethod::GET),
                 headers: HashMap::new(),
@@ -227,6 +395,7 @@ mod tests {
         repos_commands.insert(
             "issues".to_string(),
             Command {
+                description: None,
                 endpoint: Some("/repos/{owner}/{repo}/issues".to_string()),
                 method: Some(HttpMethod::GET),
                 headers: HashMap::new(),
@@ -238,6 +407,7 @@ mod tests {
         commands.insert(
             "repos".to_string(),
             Command {
+                description: None,
                 endpoint: Some("/repos".to_string()),
                 method: Some(HttpMethod::GET),
                 headers: HashMap::new(),
@@ -251,6 +421,7 @@ mod tests {
             version: "1.0.0".to_string(),
             description: "GitHub API".to_string(),
             base_url: "https://api.github.com".to_string(),
+            env: vec![],
             commands,
         }
     }
@@ -342,6 +513,109 @@ mod tests {
         let endpoint = cmd.resolve_endpoint(&params).unwrap();
         assert_eq!(endpoint, "/repos/rust-lang/rust/issues");
     }
+
+    #[test]
+    fn test_env_required_missing() {
+        let api = create_env_api();
+        let result = YcallrClient::builder(api).env_mode(EnvMode::Manual).build();
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("GITHUB_TOKEN"));
+    }
+
+    #[test]
+    fn test_env_required_set_manual() {
+        let api = create_env_api();
+        let client = YcallrClient::builder(api)
+            .env_mode(EnvMode::Manual)
+            .env("GITHUB_TOKEN", "ghp_test123")
+            .build();
+        assert!(client.is_ok());
+        let client = client.unwrap();
+        assert_eq!(client.get_env("GITHUB_TOKEN"), Some("ghp_test123"));
+    }
+
+    #[test]
+    fn test_env_not_required_missing() {
+        let mut api = create_test_api();
+        api.env = vec![crate::models::EnvVar {
+            name: "OPTIONAL_VAR".to_string(),
+            required: false,
+        }];
+        let client = YcallrClient::builder(api).env_mode(EnvMode::Manual).build();
+        assert!(client.is_ok());
+    }
+
+    #[test]
+    fn test_env_resolve_in_headers() {
+        let api = create_env_api();
+        let client = YcallrClient::builder(api)
+            .env_mode(EnvMode::Manual)
+            .env("GITHUB_TOKEN", "ghp_test123")
+            .build()
+            .unwrap();
+
+        let resolved = client.resolve_env_vars("Bearer ${GITHUB_TOKEN}").unwrap();
+        assert_eq!(resolved, "Bearer ghp_test123");
+    }
+
+    #[test]
+    fn test_env_resolve_multiple_vars() {
+        let api = create_env_api();
+        let client = YcallrClient::builder(api)
+            .env_mode(EnvMode::Manual)
+            .env("GITHUB_TOKEN", "ghp_test123")
+            .build()
+            .unwrap();
+
+        let resolved = client
+            .resolve_env_vars("${GITHUB_TOKEN} and ${GITHUB_TOKEN}")
+            .unwrap();
+        assert_eq!(resolved, "ghp_test123 and ghp_test123");
+    }
+
+    #[test]
+    fn test_env_resolve_unknown_var() {
+        let api = create_env_api();
+        let client = YcallrClient::builder(api)
+            .env_mode(EnvMode::Manual)
+            .env("GITHUB_TOKEN", "ghp_test123")
+            .build()
+            .unwrap();
+
+        let resolved = client.resolve_env_vars("${UNKNOWN}").unwrap();
+        assert_eq!(resolved, "");
+    }
+
+    #[test]
+    fn test_builder_pattern() {
+        let api = create_test_api();
+        let client = YcallrClient::builder(api)
+            .auth(AuthConfig::Bearer("token".to_string()))
+            .env_mode(EnvMode::Manual)
+            .env("KEY", "value")
+            .build()
+            .unwrap();
+
+        assert!(client.auth.is_some());
+        assert_eq!(client.env_mode(), &EnvMode::Manual);
+        assert_eq!(client.get_env("KEY"), Some("value"));
+    }
+
+    #[test]
+    fn test_set_env_after_creation() {
+        let api = create_test_api();
+        let mut client = YcallrClient::new(api).unwrap();
+        client.set_env("NEW_KEY", "new_value");
+        assert_eq!(client.get_env("NEW_KEY"), Some("new_value"));
+    }
+
+    #[test]
+    fn test_env_mode_default() {
+        let api = create_test_api();
+        let client = YcallrClient::new(api).unwrap();
+        assert_eq!(client.env_mode(), &EnvMode::Auto);
+    }
 }
 
 #[cfg(test)]
@@ -360,6 +634,7 @@ mod client_integration_tests {
         issues_commands.insert(
             "create".to_string(),
             Command {
+                description: None,
                 endpoint: Some("/repos/{owner}/{repo}/issues".to_string()),
                 method: Some(HttpMethod::POST),
                 headers: HashMap::new(),
@@ -370,6 +645,7 @@ mod client_integration_tests {
         issues_commands.insert(
             "list".to_string(),
             Command {
+                description: None,
                 endpoint: Some("/repos/{owner}/{repo}/issues".to_string()),
                 method: Some(HttpMethod::GET),
                 headers: HashMap::new(),
@@ -381,6 +657,7 @@ mod client_integration_tests {
         repos_commands.insert(
             "issues".to_string(),
             Command {
+                description: None,
                 endpoint: Some("/repos/{owner}/{repo}/issues".to_string()),
                 method: Some(HttpMethod::GET),
                 headers: HashMap::new(),
@@ -392,6 +669,7 @@ mod client_integration_tests {
         commands.insert(
             "repos".to_string(),
             Command {
+                description: None,
                 endpoint: Some("/repos".to_string()),
                 method: Some(HttpMethod::GET),
                 headers: HashMap::new(),
@@ -405,6 +683,7 @@ mod client_integration_tests {
             version: "1.0.0".to_string(),
             description: "GitHub API".to_string(),
             base_url: "https://api.github.com".to_string(),
+            env: vec![],
             commands,
         }
     }

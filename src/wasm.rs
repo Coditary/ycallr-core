@@ -30,6 +30,21 @@ impl YcallrApi {
         self.inner.base_url.clone()
     }
 
+    #[wasm_bindgen(js_name = envCount)]
+    pub fn env_count(&self) -> usize {
+        self.inner.env.len()
+    }
+
+    #[wasm_bindgen(js_name = envName)]
+    pub fn env_name(&self, index: usize) -> Option<String> {
+        self.inner.env.get(index).map(|e| e.name.clone())
+    }
+
+    #[wasm_bindgen(js_name = envRequired)]
+    pub fn env_required(&self, index: usize) -> Option<bool> {
+        self.inner.env.get(index).map(|e| e.required)
+    }
+
     pub fn to_json(&self) -> std::result::Result<String, JsValue> {
         serde_json::to_string_pretty(&self.inner).map_err(|e| JsValue::from_str(&e.to_string()))
     }
@@ -95,6 +110,29 @@ commands:
           list:
             endpoint: /repos/{owner}/{repo}/issues
             method: GET
+"#;
+
+    const ENV_YAML: &str = r#"
+name: env-api
+version: "1.0.0"
+description: API with env vars
+base_url: https://api.test.com
+env:
+  - name: GITHUB_TOKEN
+    required: true
+  - name: GITHUB_URL
+    required: false
+commands:
+  get-item:
+    endpoint: /items/{id}
+    method: GET
+    headers:
+      Authorization: "Bearer ${GITHUB_TOKEN}"
+    params:
+      id:
+        description: Item ID
+        type: string
+        required: true
 "#;
 
     #[wasm_bindgen_test]
@@ -166,5 +204,34 @@ commands:
         assert!(json.contains("repos"));
         assert!(json.contains("issues"));
         assert!(json.contains("create"));
+    }
+
+    #[wasm_bindgen_test]
+    fn test_wasm_env_count() {
+        let api = YcallrApi::new(ENV_YAML).unwrap();
+        assert_eq!(api.env_count(), 2);
+    }
+
+    #[wasm_bindgen_test]
+    fn test_wasm_env_name() {
+        let api = YcallrApi::new(ENV_YAML).unwrap();
+        assert_eq!(api.env_name(0), Some("GITHUB_TOKEN".to_string()));
+        assert_eq!(api.env_name(1), Some("GITHUB_URL".to_string()));
+        assert_eq!(api.env_name(99), None);
+    }
+
+    #[wasm_bindgen_test]
+    fn test_wasm_env_required() {
+        let api = YcallrApi::new(ENV_YAML).unwrap();
+        assert_eq!(api.env_required(0), Some(true));
+        assert_eq!(api.env_required(1), Some(false));
+        assert_eq!(api.env_required(99), None);
+    }
+
+    #[wasm_bindgen_test]
+    fn test_wasm_env_yaml_contains_substitution() {
+        let api = YcallrApi::new(ENV_YAML).unwrap();
+        let json = api.to_json().unwrap();
+        assert!(json.contains("${GITHUB_TOKEN}"));
     }
 }

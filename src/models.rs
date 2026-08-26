@@ -8,12 +8,27 @@ pub struct ApiDefinition {
     #[serde(default)]
     pub description: String,
     pub base_url: String,
+    #[serde(default)]
+    pub env: Vec<EnvVar>,
     pub commands: HashMap<String, Command>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct EnvVar {
+    pub name: String,
+    #[serde(default = "default_true")]
+    pub required: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Command {
     #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default, alias = "path")]
     pub endpoint: Option<String>,
     #[serde(default)]
     pub method: Option<HttpMethod>,
@@ -190,6 +205,7 @@ mod tests {
         commands.insert(
             "create-issue".to_string(),
             Command {
+                description: Some("Create a new issue".to_string()),
                 endpoint: Some("/repos/{owner}/{repo}/issues".to_string()),
                 method: Some(HttpMethod::POST),
                 headers,
@@ -203,6 +219,7 @@ mod tests {
             version: "1.0.0".to_string(),
             description: "GitHub API".to_string(),
             base_url: "https://api.github.com".to_string(),
+            env: vec![],
             commands,
         }
     }
@@ -216,6 +233,7 @@ mod tests {
         issues_commands.insert(
             "create".to_string(),
             Command {
+                description: Some("Create an issue".to_string()),
                 endpoint: Some("/repos/{owner}/{repo}/issues".to_string()),
                 method: Some(HttpMethod::POST),
                 headers: HashMap::new(),
@@ -226,6 +244,7 @@ mod tests {
         issues_commands.insert(
             "list".to_string(),
             Command {
+                description: Some("List issues".to_string()),
                 endpoint: Some("/repos/{owner}/{repo}/issues".to_string()),
                 method: Some(HttpMethod::GET),
                 headers: HashMap::new(),
@@ -237,6 +256,7 @@ mod tests {
         repos_commands.insert(
             "issues".to_string(),
             Command {
+                description: Some("Issues operations".to_string()),
                 endpoint: Some("/repos/{owner}/{repo}/issues".to_string()),
                 method: Some(HttpMethod::GET),
                 headers: HashMap::new(),
@@ -248,6 +268,7 @@ mod tests {
         commands.insert(
             "repos".to_string(),
             Command {
+                description: Some("Repository operations".to_string()),
                 endpoint: Some("/repos".to_string()),
                 method: Some(HttpMethod::GET),
                 headers: HashMap::new(),
@@ -261,6 +282,10 @@ mod tests {
             version: "1.0.0".to_string(),
             description: "GitHub API".to_string(),
             base_url: "https://api.github.com".to_string(),
+            env: vec![EnvVar {
+                name: "GITHUB_TOKEN".to_string(),
+                required: true,
+            }],
             commands,
         }
     }
@@ -347,6 +372,7 @@ mod tests {
     #[test]
     fn test_resolve_endpoint() {
         let cmd = Command {
+            description: None,
             endpoint: Some("/repos/{owner}/{repo}/issues".to_string()),
             method: Some(HttpMethod::POST),
             headers: HashMap::new(),
@@ -365,6 +391,7 @@ mod tests {
     #[test]
     fn test_resolve_endpoint_unresolved() {
         let cmd = Command {
+            description: None,
             endpoint: Some("/repos/{owner}/{repo}/issues".to_string()),
             method: Some(HttpMethod::POST),
             headers: HashMap::new(),
@@ -380,6 +407,7 @@ mod tests {
     #[test]
     fn test_resolve_endpoint_no_endpoint() {
         let cmd = Command {
+            description: None,
             endpoint: None,
             method: None,
             headers: HashMap::new(),
@@ -404,6 +432,7 @@ mod tests {
     #[test]
     fn test_command_is_leaf() {
         let leaf = Command {
+            description: None,
             endpoint: Some("/test".to_string()),
             method: Some(HttpMethod::GET),
             headers: HashMap::new(),
@@ -413,6 +442,7 @@ mod tests {
         assert!(leaf.is_leaf());
 
         let branch = Command {
+            description: None,
             endpoint: None,
             method: None,
             headers: HashMap::new(),
@@ -428,6 +458,7 @@ mod tests {
         sub_commands.insert(
             "sub".to_string(),
             Command {
+                description: None,
                 endpoint: Some("/sub".to_string()),
                 method: Some(HttpMethod::GET),
                 headers: HashMap::new(),
@@ -436,6 +467,7 @@ mod tests {
             },
         );
         let branch = Command {
+            description: None,
             endpoint: None,
             method: None,
             headers: HashMap::new(),
@@ -445,6 +477,7 @@ mod tests {
         assert!(branch.is_branch());
 
         let leaf = Command {
+            description: None,
             endpoint: Some("/test".to_string()),
             method: Some(HttpMethod::GET),
             headers: HashMap::new(),
@@ -452,5 +485,71 @@ mod tests {
             commands: None,
         };
         assert!(!leaf.is_branch());
+    }
+
+    #[test]
+    fn test_command_description() {
+        let cmd = create_test_api().commands.remove("create-issue").unwrap();
+        assert_eq!(cmd.description, Some("Create a new issue".to_string()));
+    }
+
+    #[test]
+    fn test_command_path_alias() {
+        let yaml = r#"
+name: test
+version: "1.0.0"
+base_url: https://api.test.com
+commands:
+  test:
+    path: /test
+    method: GET
+"#;
+        let api = crate::yaml_parser::parse_yaml(yaml).unwrap();
+        let cmd = api.commands.get("test").unwrap();
+        assert_eq!(cmd.endpoint.as_deref(), Some("/test"));
+    }
+
+    #[test]
+    fn test_env_var_default_required() {
+        let yaml = r#"
+name: test
+version: "1.0.0"
+base_url: https://api.test.com
+env:
+  - name: TOKEN
+commands:
+  test:
+    endpoint: /test
+    method: GET
+"#;
+        let api = crate::yaml_parser::parse_yaml(yaml).unwrap();
+        assert_eq!(api.env.len(), 1);
+        assert_eq!(api.env[0].name, "TOKEN");
+        assert!(api.env[0].required);
+    }
+
+    #[test]
+    fn test_env_var_not_required() {
+        let yaml = r#"
+name: test
+version: "1.0.0"
+base_url: https://api.test.com
+env:
+  - name: TOKEN
+    required: false
+commands:
+  test:
+    endpoint: /test
+    method: GET
+"#;
+        let api = crate::yaml_parser::parse_yaml(yaml).unwrap();
+        assert_eq!(api.env.len(), 1);
+        assert!(!api.env[0].required);
+    }
+
+    #[test]
+    fn test_env_empty() {
+        let api = create_test_api();
+        assert!(api.env.is_empty());
     }
 }

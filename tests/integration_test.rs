@@ -52,6 +52,69 @@ commands:
         required: false
 "#;
 
+const ENV_YAML: &str = r#"
+name: github
+version: "1.0.0"
+description: GitHub API with env vars
+base_url: https://api.github.com
+env:
+  - name: GITHUB_TOKEN
+    required: true
+  - name: API_VERSION
+    required: false
+commands:
+  get-repo:
+    endpoint: /repos/{owner}/{repo}
+    method: GET
+    headers:
+      Authorization: "Bearer ${GITHUB_TOKEN}"
+      Accept: "application/vnd.github+json"
+    params:
+      owner:
+        description: Repository owner
+        type: string
+        required: true
+      repo:
+        description: Repository name
+        type: string
+        required: true
+"#;
+
+const DESCRIPTION_YAML: &str = r#"
+name: test
+version: "1.0.0"
+base_url: https://api.test.com
+commands:
+  get-item:
+    description: "Retrieve an item by ID"
+    endpoint: /items/{id}
+    method: GET
+    params:
+      id:
+        description: Item ID
+        type: string
+        required: true
+  create-item:
+    description: "Create a new item"
+    endpoint: /items
+    method: POST
+"#;
+
+const PATH_ALIAS_YAML: &str = r#"
+name: test
+version: "1.0.0"
+base_url: https://api.test.com
+commands:
+  get-item:
+    path: /items/{id}
+    method: GET
+    params:
+      id:
+        description: Item ID
+        type: string
+        required: true
+"#;
+
 #[test]
 fn test_full_yaml_parsing() {
     let api = ycallr_core::yaml_parser::parse_yaml(FULL_YAML).unwrap();
@@ -101,6 +164,7 @@ fn test_api_validation() {
         version: "1.0.0".to_string(),
         description: "Test".to_string(),
         base_url: "https://api.test.com".to_string(),
+        env: vec![],
         commands: HashMap::new(),
     };
     assert!(valid_api.validate().is_ok());
@@ -110,6 +174,7 @@ fn test_api_validation() {
         version: "1.0.0".to_string(),
         description: "Test".to_string(),
         base_url: "https://api.test.com".to_string(),
+        env: vec![],
         commands: HashMap::new(),
     };
     assert!(invalid_api.validate().is_err());
@@ -308,4 +373,77 @@ fn test_nested_protobuf_roundtrip() {
 
     let create = restored.get_command("repos.issues.create").unwrap();
     assert_eq!(create.method.as_ref().unwrap(), &HttpMethod::POST);
+}
+
+#[test]
+fn test_env_yaml_parsing() {
+    let api = ycallr_core::yaml_parser::parse_yaml(ENV_YAML).unwrap();
+    assert_eq!(api.env.len(), 2);
+    assert_eq!(api.env[0].name, "GITHUB_TOKEN");
+    assert!(api.env[0].required);
+    assert_eq!(api.env[1].name, "API_VERSION");
+    assert!(!api.env[1].required);
+}
+
+#[test]
+fn test_env_yaml_substitution_in_headers() {
+    let api = ycallr_core::yaml_parser::parse_yaml(ENV_YAML).unwrap();
+    let cmd = api.commands.get("get-repo").unwrap();
+    assert_eq!(
+        cmd.headers.get("Authorization").unwrap(),
+        "Bearer ${GITHUB_TOKEN}"
+    );
+}
+
+#[test]
+fn test_env_protobuf_roundtrip() {
+    let api = ycallr_core::yaml_parser::parse_yaml(ENV_YAML).unwrap();
+    let proto_bytes = api.to_proto_bytes().unwrap();
+    let restored = ApiDefinition::from_proto_bytes(&proto_bytes).unwrap();
+
+    assert_eq!(restored.env.len(), 2);
+    assert_eq!(restored.env[0].name, "GITHUB_TOKEN");
+    assert!(restored.env[0].required);
+
+    let cmd = restored.commands.get("get-repo").unwrap();
+    assert_eq!(
+        cmd.headers.get("Authorization").unwrap(),
+        "Bearer ${GITHUB_TOKEN}"
+    );
+}
+
+#[test]
+fn test_description_yaml_parsing() {
+    let api = ycallr_core::yaml_parser::parse_yaml(DESCRIPTION_YAML).unwrap();
+    let get_item = api.commands.get("get-item").unwrap();
+    assert_eq!(
+        get_item.description,
+        Some("Retrieve an item by ID".to_string())
+    );
+
+    let create_item = api.commands.get("create-item").unwrap();
+    assert_eq!(
+        create_item.description,
+        Some("Create a new item".to_string())
+    );
+}
+
+#[test]
+fn test_path_alias_yaml_parsing() {
+    let api = ycallr_core::yaml_parser::parse_yaml(PATH_ALIAS_YAML).unwrap();
+    let cmd = api.commands.get("get-item").unwrap();
+    assert_eq!(cmd.endpoint.as_deref(), Some("/items/{id}"));
+}
+
+#[test]
+fn test_description_protobuf_roundtrip() {
+    let api = ycallr_core::yaml_parser::parse_yaml(DESCRIPTION_YAML).unwrap();
+    let proto_bytes = api.to_proto_bytes().unwrap();
+    let restored = ApiDefinition::from_proto_bytes(&proto_bytes).unwrap();
+
+    let get_item = restored.commands.get("get-item").unwrap();
+    assert_eq!(
+        get_item.description,
+        Some("Retrieve an item by ID".to_string())
+    );
 }

@@ -1,5 +1,5 @@
 use crate::client::ApiResponse;
-use crate::models::{ApiDefinition, Command, HttpMethod, ParamType, Parameter};
+use crate::models::{ApiDefinition, Command, EnvVar, HttpMethod, ParamType, Parameter};
 use std::collections::HashMap;
 
 pub struct MockApiClient {
@@ -92,6 +92,7 @@ pub fn github_api() -> ApiDefinition {
     commands.insert(
         "get-repo".to_string(),
         Command {
+            description: Some("Get a repository".to_string()),
             endpoint: Some("/repos/{owner}/{repo}".to_string()),
             method: Some(HttpMethod::GET),
             headers: get_repo_headers,
@@ -136,6 +137,7 @@ pub fn github_api() -> ApiDefinition {
     commands.insert(
         "create-issue".to_string(),
         Command {
+            description: Some("Create a new issue".to_string()),
             endpoint: Some("/repos/{owner}/{repo}/issues".to_string()),
             method: Some(HttpMethod::POST),
             headers: create_issue_headers,
@@ -179,6 +181,7 @@ pub fn github_api() -> ApiDefinition {
     commands.insert(
         "list-issues".to_string(),
         Command {
+            description: Some("List issues".to_string()),
             endpoint: Some("/repos/{owner}/{repo}/issues".to_string()),
             method: Some(HttpMethod::GET),
             headers: list_issues_headers,
@@ -192,6 +195,7 @@ pub fn github_api() -> ApiDefinition {
         version: "1.0.0".to_string(),
         description: "GitHub REST API".to_string(),
         base_url: "https://api.github.com".to_string(),
+        env: vec![],
         commands,
     }
 }
@@ -215,6 +219,7 @@ pub fn simple_api() -> ApiDefinition {
     commands.insert(
         "get-item".to_string(),
         Command {
+            description: Some("Get an item".to_string()),
             endpoint: Some("/items/{id}".to_string()),
             method: Some(HttpMethod::GET),
             headers,
@@ -226,6 +231,7 @@ pub fn simple_api() -> ApiDefinition {
     commands.insert(
         "create-item".to_string(),
         Command {
+            description: Some("Create an item".to_string()),
             endpoint: Some("/items".to_string()),
             method: Some(HttpMethod::POST),
             headers: HashMap::new(),
@@ -239,6 +245,7 @@ pub fn simple_api() -> ApiDefinition {
         version: "1.0.0".to_string(),
         description: "Simple test API".to_string(),
         base_url: "https://api.example.com".to_string(),
+        env: vec![],
         commands,
     }
 }
@@ -252,6 +259,7 @@ pub fn nested_github_api() -> ApiDefinition {
     issues_commands.insert(
         "create".to_string(),
         Command {
+            description: Some("Create an issue".to_string()),
             endpoint: Some("/repos/{owner}/{repo}/issues".to_string()),
             method: Some(HttpMethod::POST),
             headers: HashMap::new(),
@@ -262,6 +270,7 @@ pub fn nested_github_api() -> ApiDefinition {
     issues_commands.insert(
         "list".to_string(),
         Command {
+            description: Some("List issues".to_string()),
             endpoint: Some("/repos/{owner}/{repo}/issues".to_string()),
             method: Some(HttpMethod::GET),
             headers: HashMap::new(),
@@ -273,6 +282,7 @@ pub fn nested_github_api() -> ApiDefinition {
     repos_commands.insert(
         "issues".to_string(),
         Command {
+            description: Some("Issues operations".to_string()),
             endpoint: Some("/repos/{owner}/{repo}/issues".to_string()),
             method: Some(HttpMethod::GET),
             headers: HashMap::new(),
@@ -284,6 +294,7 @@ pub fn nested_github_api() -> ApiDefinition {
     repos_commands.insert(
         "get".to_string(),
         Command {
+            description: Some("Get a repository".to_string()),
             endpoint: Some("/repos/{owner}/{repo}".to_string()),
             method: Some(HttpMethod::GET),
             headers: HashMap::new(),
@@ -295,6 +306,7 @@ pub fn nested_github_api() -> ApiDefinition {
     commands.insert(
         "repos".to_string(),
         Command {
+            description: Some("Repository operations".to_string()),
             endpoint: Some("/repos".to_string()),
             method: Some(HttpMethod::GET),
             headers: HashMap::new(),
@@ -307,6 +319,7 @@ pub fn nested_github_api() -> ApiDefinition {
     users_commands.insert(
         "get".to_string(),
         Command {
+            description: Some("Get a user".to_string()),
             endpoint: Some("/users/{username}".to_string()),
             method: Some(HttpMethod::GET),
             headers: HashMap::new(),
@@ -318,6 +331,7 @@ pub fn nested_github_api() -> ApiDefinition {
     commands.insert(
         "users".to_string(),
         Command {
+            description: Some("User operations".to_string()),
             endpoint: Some("/users".to_string()),
             method: Some(HttpMethod::GET),
             headers: HashMap::new(),
@@ -331,6 +345,54 @@ pub fn nested_github_api() -> ApiDefinition {
         version: "1.0.0".to_string(),
         description: "GitHub REST API with nested commands".to_string(),
         base_url: "https://api.github.com".to_string(),
+        env: vec![EnvVar {
+            name: "GITHUB_TOKEN".to_string(),
+            required: true,
+        }],
+        commands,
+    }
+}
+
+pub fn env_api() -> ApiDefinition {
+    let mut commands = HashMap::new();
+
+    let mut headers = HashMap::new();
+    headers.insert(
+        "Authorization".to_string(),
+        "Bearer ${GITHUB_TOKEN}".to_string(),
+    );
+    headers.insert(
+        "Accept".to_string(),
+        "application/vnd.github+json".to_string(),
+    );
+
+    commands.insert(
+        "get-repo".to_string(),
+        Command {
+            description: Some("Get a repository".to_string()),
+            endpoint: Some("/repos/{owner}/{repo}".to_string()),
+            method: Some(HttpMethod::GET),
+            headers,
+            params: HashMap::new(),
+            commands: None,
+        },
+    );
+
+    ApiDefinition {
+        name: "github-env".to_string(),
+        version: "1.0.0".to_string(),
+        description: "GitHub API with env vars".to_string(),
+        base_url: "https://api.github.com".to_string(),
+        env: vec![
+            EnvVar {
+                name: "GITHUB_TOKEN".to_string(),
+                required: true,
+            },
+            EnvVar {
+                name: "API_VERSION".to_string(),
+                required: false,
+            },
+        ],
         commands,
     }
 }
@@ -565,5 +627,26 @@ mod tests {
         assert_eq!(mock.call_count("repos.issues.list"), 1);
         assert!(mock.was_called("repos.issues.create"));
         assert!(mock.was_called("repos.issues.list"));
+    }
+
+    #[test]
+    fn test_env_api_structure() {
+        let api = env_api();
+        assert_eq!(api.name, "github-env");
+        assert_eq!(api.env.len(), 2);
+        assert_eq!(api.env[0].name, "GITHUB_TOKEN");
+        assert!(api.env[0].required);
+        assert_eq!(api.env[1].name, "API_VERSION");
+        assert!(!api.env[1].required);
+    }
+
+    #[test]
+    fn test_env_api_has_substitution() {
+        let api = env_api();
+        let cmd = api.commands.get("get-repo").unwrap();
+        assert_eq!(
+            cmd.headers.get("Authorization").unwrap(),
+            "Bearer ${GITHUB_TOKEN}"
+        );
     }
 }
