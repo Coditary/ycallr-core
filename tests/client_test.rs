@@ -1,4 +1,4 @@
-#![cfg(not(target_arch = "wasm32"))]
+#![cfg(all(not(target_arch = "wasm32"), feature = "client"))]
 
 use std::collections::HashMap;
 use ycallr_core::{
@@ -32,10 +32,11 @@ fn create_test_api(base_url: &str) -> ApiDefinition {
     commands.insert(
         "get-repo".to_string(),
         Command {
-            endpoint: "/repos/{owner}/{repo}".to_string(),
-            method: HttpMethod::GET,
+            endpoint: Some("/repos/{owner}/{repo}".to_string()),
+            method: Some(HttpMethod::GET),
             headers: get_headers,
             params: get_params,
+            commands: None,
         },
     );
 
@@ -55,10 +56,11 @@ fn create_test_api(base_url: &str) -> ApiDefinition {
     commands.insert(
         "create-issue".to_string(),
         Command {
-            endpoint: "/repos/{owner}/{repo}/issues".to_string(),
-            method: HttpMethod::POST,
+            endpoint: Some("/repos/{owner}/{repo}/issues".to_string()),
+            method: Some(HttpMethod::POST),
             headers: post_headers,
             params: post_params,
+            commands: None,
         },
     );
 
@@ -66,6 +68,54 @@ fn create_test_api(base_url: &str) -> ApiDefinition {
         name: "github".to_string(),
         version: "1.0.0".to_string(),
         description: "GitHub API".to_string(),
+        base_url: base_url.to_string(),
+        commands,
+    }
+}
+
+fn create_nested_test_api(base_url: &str) -> ApiDefinition {
+    let mut commands = HashMap::new();
+
+    let mut repos_commands = HashMap::new();
+    let mut issues_commands = HashMap::new();
+
+    issues_commands.insert(
+        "create".to_string(),
+        Command {
+            endpoint: Some("/repos/{owner}/{repo}/issues".to_string()),
+            method: Some(HttpMethod::POST),
+            headers: HashMap::new(),
+            params: HashMap::new(),
+            commands: None,
+        },
+    );
+
+    repos_commands.insert(
+        "issues".to_string(),
+        Command {
+            endpoint: Some("/repos/{owner}/{repo}/issues".to_string()),
+            method: Some(HttpMethod::GET),
+            headers: HashMap::new(),
+            params: HashMap::new(),
+            commands: Some(issues_commands),
+        },
+    );
+
+    commands.insert(
+        "repos".to_string(),
+        Command {
+            endpoint: Some("/repos".to_string()),
+            method: Some(HttpMethod::GET),
+            headers: HashMap::new(),
+            params: HashMap::new(),
+            commands: Some(repos_commands),
+        },
+    );
+
+    ApiDefinition {
+        name: "github-nested".to_string(),
+        version: "1.0.0".to_string(),
+        description: "GitHub API with nested commands".to_string(),
         base_url: base_url.to_string(),
         commands,
     }
@@ -211,4 +261,54 @@ fn test_client_access_api() {
     let api = create_test_api("https://api.github.com");
     let client = YcallrClient::new(api).unwrap();
     assert_eq!(client.api().name, "github");
+}
+
+#[test]
+fn test_nested_client_get_request() {
+    let mut server = mockito::Server::new();
+
+    let mock = server
+        .mock("POST", "/repos/rust-lang/rust/issues")
+        .with_status(201)
+        .with_header("content-type", "application/json")
+        .with_body(r#"{"id": 1, "title": "Bug report"}"#)
+        .create();
+
+    let api = create_nested_test_api(&server.url());
+    let client = YcallrClient::new(api).unwrap();
+
+    let mut params = HashMap::new();
+    params.insert("owner".to_string(), "rust-lang".to_string());
+    params.insert("repo".to_string(), "rust".to_string());
+
+    let body = serde_json::json!({"title": "Bug report"});
+    let response = client
+        .call("repos.issues.create", &params, Some(&body))
+        .unwrap();
+
+    mock.assert();
+    assert_eq!(response.status, 201);
+    assert_eq!(response.body["title"], "Bug report");
+}
+
+#[test]
+fn test_nested_client_command_not_found() {
+    let api = create_nested_test_api("https://api.github.com");
+    let client = YcallrClient::new(api).unwrap();
+    let params = HashMap::new();
+    let result = client.call("repos.issues.nonexistent", &params, None);
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_nested_client_endpoint_resolution() {
+    let api = create_nested_test_api("https://api.github.com");
+    let client = YcallrClient::new(api).unwrap();
+    let mut params = HashMap::new();
+    params.insert("owner".to_string(), "rust-lang".to_string());
+    params.insert("repo".to_string(), "rust".to_string());
+
+    let cmd = client.api().get_command("repos.issues.create").unwrap();
+    let endpoint = cmd.resolve_endpoint(&params).unwrap();
+    assert_eq!(endpoint, "/repos/rust-lang/rust/issues");
 }

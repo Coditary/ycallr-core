@@ -62,11 +62,11 @@ fn test_full_yaml_parsing() {
     assert_eq!(api.commands.len(), 2);
 
     let create_issue = api.get_command("create-issue").unwrap();
-    assert_eq!(create_issue.method, HttpMethod::POST);
+    assert_eq!(create_issue.method.as_ref().unwrap(), &HttpMethod::POST);
     assert_eq!(create_issue.params.len(), 4);
 
     let list_issues = api.get_command("list-issues").unwrap();
-    assert_eq!(list_issues.method, HttpMethod::GET);
+    assert_eq!(list_issues.method.as_ref().unwrap(), &HttpMethod::GET);
 }
 
 #[test]
@@ -193,22 +193,119 @@ commands:
 
     assert_eq!(
         api.commands.get("get_test").unwrap().method,
-        HttpMethod::GET
+        Some(HttpMethod::GET)
     );
     assert_eq!(
         api.commands.get("post_test").unwrap().method,
-        HttpMethod::POST
+        Some(HttpMethod::POST)
     );
     assert_eq!(
         api.commands.get("put_test").unwrap().method,
-        HttpMethod::PUT
+        Some(HttpMethod::PUT)
     );
     assert_eq!(
         api.commands.get("delete_test").unwrap().method,
-        HttpMethod::DELETE
+        Some(HttpMethod::DELETE)
     );
     assert_eq!(
         api.commands.get("patch_test").unwrap().method,
-        HttpMethod::PATCH
+        Some(HttpMethod::PATCH)
     );
+}
+
+const NESTED_YAML: &str = r#"
+name: github
+version: "1.0.0"
+description: GitHub REST API with nested commands
+base_url: https://api.github.com
+commands:
+  repos:
+    endpoint: /repos
+    method: GET
+    commands:
+      issues:
+        endpoint: /repos/{owner}/{repo}/issues
+        method: GET
+        commands:
+          create:
+            endpoint: /repos/{owner}/{repo}/issues
+            method: POST
+          list:
+            endpoint: /repos/{owner}/{repo}/issues
+            method: GET
+  users:
+    endpoint: /users
+    method: GET
+    commands:
+      get:
+        endpoint: /users/{username}
+        method: GET
+"#;
+
+#[test]
+fn test_nested_yaml_parsing() {
+    let api = ycallr_core::yaml_parser::parse_yaml(NESTED_YAML).unwrap();
+    assert_eq!(api.name, "github");
+    assert_eq!(api.commands.len(), 2);
+}
+
+#[test]
+fn test_nested_command_lookup() {
+    let api = ycallr_core::yaml_parser::parse_yaml(NESTED_YAML).unwrap();
+
+    let repos = api.get_command("repos");
+    assert!(repos.is_ok());
+
+    let issues = api.get_command("repos.issues");
+    assert!(issues.is_ok());
+
+    let create = api.get_command("repos.issues.create");
+    assert!(create.is_ok());
+    assert_eq!(create.unwrap().method.as_ref().unwrap(), &HttpMethod::POST);
+
+    let list = api.get_command("repos.issues.list");
+    assert!(list.is_ok());
+    assert_eq!(list.unwrap().method.as_ref().unwrap(), &HttpMethod::GET);
+
+    let users_get = api.get_command("users.get");
+    assert!(users_get.is_ok());
+    assert_eq!(
+        users_get.unwrap().method.as_ref().unwrap(),
+        &HttpMethod::GET
+    );
+}
+
+#[test]
+fn test_nested_command_not_found() {
+    let api = ycallr_core::yaml_parser::parse_yaml(NESTED_YAML).unwrap();
+
+    assert!(api.get_command("nonexistent").is_err());
+    assert!(api.get_command("repos.nonexistent").is_err());
+    assert!(api.get_command("repos.issues.nonexistent").is_err());
+}
+
+#[test]
+fn test_nested_endpoint_resolution() {
+    let api = ycallr_core::yaml_parser::parse_yaml(NESTED_YAML).unwrap();
+    let cmd = api.get_command("repos.issues.create").unwrap();
+
+    let mut params = HashMap::new();
+    params.insert("owner".to_string(), "rust-lang".to_string());
+    params.insert("repo".to_string(), "rust".to_string());
+
+    let resolved = cmd.resolve_endpoint(&params).unwrap();
+    assert_eq!(resolved, "/repos/rust-lang/rust/issues");
+}
+
+#[test]
+fn test_nested_protobuf_roundtrip() {
+    let api = ycallr_core::yaml_parser::parse_yaml(NESTED_YAML).unwrap();
+    let proto_bytes = api.to_proto_bytes().unwrap();
+    let restored = ApiDefinition::from_proto_bytes(&proto_bytes).unwrap();
+
+    assert_eq!(api.name, restored.name);
+    assert_eq!(api.commands.len(), restored.commands.len());
+
+    let create = restored.get_command("repos.issues.create").unwrap();
+    assert_eq!(create.method.as_ref().unwrap(), &HttpMethod::POST);
 }

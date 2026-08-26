@@ -92,10 +92,11 @@ pub fn github_api() -> ApiDefinition {
     commands.insert(
         "get-repo".to_string(),
         Command {
-            endpoint: "/repos/{owner}/{repo}".to_string(),
-            method: HttpMethod::GET,
+            endpoint: Some("/repos/{owner}/{repo}".to_string()),
+            method: Some(HttpMethod::GET),
             headers: get_repo_headers,
             params: get_repo_params,
+            commands: None,
         },
     );
 
@@ -135,10 +136,11 @@ pub fn github_api() -> ApiDefinition {
     commands.insert(
         "create-issue".to_string(),
         Command {
-            endpoint: "/repos/{owner}/{repo}/issues".to_string(),
-            method: HttpMethod::POST,
+            endpoint: Some("/repos/{owner}/{repo}/issues".to_string()),
+            method: Some(HttpMethod::POST),
             headers: create_issue_headers,
             params: create_issue_params,
+            commands: None,
         },
     );
 
@@ -177,10 +179,11 @@ pub fn github_api() -> ApiDefinition {
     commands.insert(
         "list-issues".to_string(),
         Command {
-            endpoint: "/repos/{owner}/{repo}/issues".to_string(),
-            method: HttpMethod::GET,
+            endpoint: Some("/repos/{owner}/{repo}/issues".to_string()),
+            method: Some(HttpMethod::GET),
             headers: list_issues_headers,
             params: list_issues_params,
+            commands: None,
         },
     );
 
@@ -212,20 +215,22 @@ pub fn simple_api() -> ApiDefinition {
     commands.insert(
         "get-item".to_string(),
         Command {
-            endpoint: "/items/{id}".to_string(),
-            method: HttpMethod::GET,
+            endpoint: Some("/items/{id}".to_string()),
+            method: Some(HttpMethod::GET),
             headers,
             params,
+            commands: None,
         },
     );
 
     commands.insert(
         "create-item".to_string(),
         Command {
-            endpoint: "/items".to_string(),
-            method: HttpMethod::POST,
+            endpoint: Some("/items".to_string()),
+            method: Some(HttpMethod::POST),
             headers: HashMap::new(),
             params: HashMap::new(),
+            commands: None,
         },
     );
 
@@ -234,6 +239,98 @@ pub fn simple_api() -> ApiDefinition {
         version: "1.0.0".to_string(),
         description: "Simple test API".to_string(),
         base_url: "https://api.example.com".to_string(),
+        commands,
+    }
+}
+
+pub fn nested_github_api() -> ApiDefinition {
+    let mut commands = HashMap::new();
+
+    let mut repos_commands = HashMap::new();
+
+    let mut issues_commands = HashMap::new();
+    issues_commands.insert(
+        "create".to_string(),
+        Command {
+            endpoint: Some("/repos/{owner}/{repo}/issues".to_string()),
+            method: Some(HttpMethod::POST),
+            headers: HashMap::new(),
+            params: HashMap::new(),
+            commands: None,
+        },
+    );
+    issues_commands.insert(
+        "list".to_string(),
+        Command {
+            endpoint: Some("/repos/{owner}/{repo}/issues".to_string()),
+            method: Some(HttpMethod::GET),
+            headers: HashMap::new(),
+            params: HashMap::new(),
+            commands: None,
+        },
+    );
+
+    repos_commands.insert(
+        "issues".to_string(),
+        Command {
+            endpoint: Some("/repos/{owner}/{repo}/issues".to_string()),
+            method: Some(HttpMethod::GET),
+            headers: HashMap::new(),
+            params: HashMap::new(),
+            commands: Some(issues_commands),
+        },
+    );
+
+    repos_commands.insert(
+        "get".to_string(),
+        Command {
+            endpoint: Some("/repos/{owner}/{repo}".to_string()),
+            method: Some(HttpMethod::GET),
+            headers: HashMap::new(),
+            params: HashMap::new(),
+            commands: None,
+        },
+    );
+
+    commands.insert(
+        "repos".to_string(),
+        Command {
+            endpoint: Some("/repos".to_string()),
+            method: Some(HttpMethod::GET),
+            headers: HashMap::new(),
+            params: HashMap::new(),
+            commands: Some(repos_commands),
+        },
+    );
+
+    let mut users_commands = HashMap::new();
+    users_commands.insert(
+        "get".to_string(),
+        Command {
+            endpoint: Some("/users/{username}".to_string()),
+            method: Some(HttpMethod::GET),
+            headers: HashMap::new(),
+            params: HashMap::new(),
+            commands: None,
+        },
+    );
+
+    commands.insert(
+        "users".to_string(),
+        Command {
+            endpoint: Some("/users".to_string()),
+            method: Some(HttpMethod::GET),
+            headers: HashMap::new(),
+            params: HashMap::new(),
+            commands: Some(users_commands),
+        },
+    );
+
+    ApiDefinition {
+        name: "github-nested".to_string(),
+        version: "1.0.0".to_string(),
+        description: "GitHub REST API with nested commands".to_string(),
+        base_url: "https://api.github.com".to_string(),
         commands,
     }
 }
@@ -353,6 +450,59 @@ mod tests {
     }
 
     #[test]
+    fn test_nested_github_api_structure() {
+        let api = nested_github_api();
+        assert_eq!(api.name, "github-nested");
+        assert!(api.commands.contains_key("repos"));
+        assert!(api.commands.contains_key("users"));
+
+        let repos = api.commands.get("repos").unwrap();
+        assert!(repos.is_branch());
+        assert!(repos.is_leaf());
+        assert!(repos.commands.is_some());
+
+        let issues = repos.commands.as_ref().unwrap().get("issues").unwrap();
+        assert!(issues.is_branch());
+        assert!(issues.is_leaf());
+    }
+
+    #[test]
+    fn test_nested_github_api_lookup() {
+        let api = nested_github_api();
+
+        let repos = api.get_command("repos");
+        assert!(repos.is_ok());
+
+        let issues = api.get_command("repos.issues");
+        assert!(issues.is_ok());
+
+        let create = api.get_command("repos.issues.create");
+        assert!(create.is_ok());
+        assert_eq!(create.unwrap().method.as_ref().unwrap(), &HttpMethod::POST);
+
+        let users_get = api.get_command("users.get");
+        assert!(users_get.is_ok());
+        assert_eq!(
+            users_get.unwrap().method.as_ref().unwrap(),
+            &HttpMethod::GET
+        );
+    }
+
+    #[test]
+    fn test_nested_github_api_not_found() {
+        let api = nested_github_api();
+
+        let result = api.get_command("repos.nonexistent");
+        assert!(result.is_err());
+
+        let result = api.get_command("repos.issues.nonexistent");
+        assert!(result.is_err());
+
+        let result = api.get_command("nonexistent");
+        assert!(result.is_err());
+    }
+
+    #[test]
     fn test_make_params() {
         let params = make_params(&[("owner", "rust-lang"), ("repo", "rust")]);
         assert_eq!(params.get("owner").unwrap(), "rust-lang");
@@ -391,5 +541,29 @@ mod tests {
         assert_eq!(calls.len(), 2);
         assert_eq!(calls[0].command, "get-item");
         assert_eq!(calls[1].command, "create-item");
+    }
+
+    #[test]
+    fn test_mock_nested_command_tracking() {
+        let mut mock = MockApiClient::new();
+        mock.expect(
+            "repos.issues.create",
+            response_ok(serde_json::json!({"created": true})),
+        );
+        mock.expect(
+            "repos.issues.list",
+            response_ok(serde_json::json!([{"id": 1}])),
+        );
+
+        let params = make_params(&[("owner", "rust-lang"), ("repo", "rust")]);
+        let body = serde_json::json!({"title": "Bug"});
+        mock.call("repos.issues.create", &params, Some(&body))
+            .unwrap();
+        mock.call("repos.issues.list", &params, None).unwrap();
+
+        assert_eq!(mock.call_count("repos.issues.create"), 1);
+        assert_eq!(mock.call_count("repos.issues.list"), 1);
+        assert!(mock.was_called("repos.issues.create"));
+        assert!(mock.was_called("repos.issues.list"));
     }
 }

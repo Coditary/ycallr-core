@@ -42,7 +42,7 @@ impl YcallrApi {
 
     #[wasm_bindgen(js_name = commandExists)]
     pub fn command_exists(&self, name: &str) -> bool {
-        self.inner.commands.contains_key(name)
+        self.inner.get_command(name).is_ok()
     }
 }
 
@@ -73,6 +73,28 @@ commands:
         description: Item name
         type: string
         required: true
+"#;
+
+    const NESTED_YAML: &str = r#"
+name: nested-api
+version: "1.0.0"
+description: Nested API for WASM
+base_url: https://api.test.com
+commands:
+  repos:
+    endpoint: /repos
+    method: GET
+    commands:
+      issues:
+        endpoint: /repos/{owner}/{repo}/issues
+        method: GET
+        commands:
+          create:
+            endpoint: /repos/{owner}/{repo}/issues
+            method: POST
+          list:
+            endpoint: /repos/{owner}/{repo}/issues
+            method: GET
 "#;
 
     #[wasm_bindgen_test]
@@ -122,5 +144,27 @@ commands:
         assert!(api.command_exists("get-item"));
         assert!(api.command_exists("create-item"));
         assert!(!api.command_exists("nonexistent"));
+    }
+
+    #[wasm_bindgen_test]
+    fn test_wasm_nested_command_exists() {
+        let api = YcallrApi::new(NESTED_YAML).unwrap();
+        assert!(api.command_exists("repos"));
+        assert!(api.command_exists("repos.issues"));
+        assert!(api.command_exists("repos.issues.create"));
+        assert!(api.command_exists("repos.issues.list"));
+        assert!(!api.command_exists("repos.issues.nonexistent"));
+        assert!(!api.command_exists("repos.nonexistent"));
+    }
+
+    #[wasm_bindgen_test]
+    fn test_wasm_nested_yaml_to_proto_roundtrip() {
+        let api = YcallrApi::new(NESTED_YAML).unwrap();
+        let proto = api.to_proto().unwrap();
+        assert!(!proto.is_empty());
+        let json = api.to_json().unwrap();
+        assert!(json.contains("repos"));
+        assert!(json.contains("issues"));
+        assert!(json.contains("create"));
     }
 }

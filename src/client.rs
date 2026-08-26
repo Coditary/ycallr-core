@@ -60,7 +60,12 @@ impl YcallrClient {
         let endpoint = cmd.resolve_endpoint(params)?;
         let url = format!("{}{}", self.api.base_url.trim_end_matches('/'), endpoint);
 
-        let mut request = match cmd.method {
+        let method = cmd
+            .method
+            .as_ref()
+            .ok_or_else(|| YcallrError::ParamValidation("Command has no method".into()))?;
+
+        let mut request = match method {
             HttpMethod::GET => self.http_client.get(&url),
             HttpMethod::POST => self.http_client.post(&url),
             HttpMethod::PUT => self.http_client.put(&url),
@@ -121,7 +126,7 @@ impl YcallrClient {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::{Command, HttpMethod, ParamType, Parameter};
+    use crate::models::{Command, ParamType, Parameter};
 
     fn create_test_api() -> ApiDefinition {
         let mut commands = HashMap::new();
@@ -151,10 +156,11 @@ mod tests {
         commands.insert(
             "get-repo".to_string(),
             Command {
-                endpoint: "/repos/{owner}/{repo}".to_string(),
-                method: HttpMethod::GET,
+                endpoint: Some("/repos/{owner}/{repo}".to_string()),
+                method: Some(HttpMethod::GET),
                 headers,
                 params,
+                commands: None,
             },
         );
 
@@ -174,10 +180,69 @@ mod tests {
         commands.insert(
             "create-issue".to_string(),
             Command {
-                endpoint: "/repos/{owner}/{repo}/issues".to_string(),
-                method: HttpMethod::POST,
+                endpoint: Some("/repos/{owner}/{repo}/issues".to_string()),
+                method: Some(HttpMethod::POST),
                 headers: create_headers,
                 params: create_params,
+                commands: None,
+            },
+        );
+
+        ApiDefinition {
+            name: "github".to_string(),
+            version: "1.0.0".to_string(),
+            description: "GitHub API".to_string(),
+            base_url: "https://api.github.com".to_string(),
+            commands,
+        }
+    }
+
+    fn create_nested_api() -> ApiDefinition {
+        let mut commands = HashMap::new();
+
+        let mut repos_commands = HashMap::new();
+
+        let mut issues_commands = HashMap::new();
+        issues_commands.insert(
+            "create".to_string(),
+            Command {
+                endpoint: Some("/repos/{owner}/{repo}/issues".to_string()),
+                method: Some(HttpMethod::POST),
+                headers: HashMap::new(),
+                params: HashMap::new(),
+                commands: None,
+            },
+        );
+        issues_commands.insert(
+            "list".to_string(),
+            Command {
+                endpoint: Some("/repos/{owner}/{repo}/issues".to_string()),
+                method: Some(HttpMethod::GET),
+                headers: HashMap::new(),
+                params: HashMap::new(),
+                commands: None,
+            },
+        );
+
+        repos_commands.insert(
+            "issues".to_string(),
+            Command {
+                endpoint: Some("/repos/{owner}/{repo}/issues".to_string()),
+                method: Some(HttpMethod::GET),
+                headers: HashMap::new(),
+                params: HashMap::new(),
+                commands: Some(issues_commands),
+            },
+        );
+
+        commands.insert(
+            "repos".to_string(),
+            Command {
+                endpoint: Some("/repos".to_string()),
+                method: Some(HttpMethod::GET),
+                headers: HashMap::new(),
+                params: HashMap::new(),
+                commands: Some(repos_commands),
             },
         );
 
@@ -248,149 +313,161 @@ mod tests {
         assert_eq!(response.status, 200);
         assert_eq!(response.body["key"], "value");
     }
+
+    #[test]
+    fn test_nested_command_lookup() {
+        let api = create_nested_api();
+        let client = YcallrClient::new(api).unwrap();
+        let cmd = client.api.get_command("repos.issues.create").unwrap();
+        assert_eq!(cmd.method.as_ref().unwrap(), &HttpMethod::POST);
+    }
+
+    #[test]
+    fn test_nested_command_not_found() {
+        let api = create_nested_api();
+        let client = YcallrClient::new(api).unwrap();
+        let params: HashMap<String, String> = HashMap::new();
+        let result = client.call("repos.issues.nonexistent", &params, None);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_nested_endpoint_resolution() {
+        let api = create_nested_api();
+        let client = YcallrClient::new(api).unwrap();
+        let mut params = HashMap::new();
+        params.insert("owner".to_string(), "rust-lang".to_string());
+        params.insert("repo".to_string(), "rust".to_string());
+        let cmd = client.api.get_command("repos.issues.create").unwrap();
+        let endpoint = cmd.resolve_endpoint(&params).unwrap();
+        assert_eq!(endpoint, "/repos/rust-lang/rust/issues");
+    }
 }
 
 #[cfg(test)]
 #[cfg(feature = "test-utils")]
 mod client_integration_tests {
     use super::*;
-    use crate::models::{Command, ParamType, Parameter};
+    use crate::models::Command;
     use crate::test_utils::{make_params, response_ok};
 
-    fn create_full_api() -> ApiDefinition {
+    fn create_nested_api_for_mock() -> ApiDefinition {
         let mut commands = HashMap::new();
 
-        let mut params = HashMap::new();
-        params.insert(
-            "id".to_string(),
-            Parameter {
-                description: "Resource ID".to_string(),
-                param_type: ParamType::String,
-                required: true,
-            },
-        );
+        let mut repos_commands = HashMap::new();
 
-        let mut headers = HashMap::new();
-        headers.insert("Accept".to_string(), "application/json".to_string());
-
-        commands.insert(
-            "get-item".to_string(),
+        let mut issues_commands = HashMap::new();
+        issues_commands.insert(
+            "create".to_string(),
             Command {
-                endpoint: "/items/{id}".to_string(),
-                method: HttpMethod::GET,
-                headers: headers.clone(),
-                params: params.clone(),
-            },
-        );
-
-        commands.insert(
-            "create-item".to_string(),
-            Command {
-                endpoint: "/items".to_string(),
-                method: HttpMethod::POST,
-                headers: headers.clone(),
+                endpoint: Some("/repos/{owner}/{repo}/issues".to_string()),
+                method: Some(HttpMethod::POST),
+                headers: HashMap::new(),
                 params: HashMap::new(),
+                commands: None,
             },
         );
-
-        commands.insert(
-            "update-item".to_string(),
+        issues_commands.insert(
+            "list".to_string(),
             Command {
-                endpoint: "/items/{id}".to_string(),
-                method: HttpMethod::PUT,
-                headers: headers.clone(),
-                params,
-            },
-        );
-
-        commands.insert(
-            "delete-item".to_string(),
-            Command {
-                endpoint: "/items/{id}".to_string(),
-                method: HttpMethod::DELETE,
-                headers: headers.clone(),
+                endpoint: Some("/repos/{owner}/{repo}/issues".to_string()),
+                method: Some(HttpMethod::GET),
+                headers: HashMap::new(),
                 params: HashMap::new(),
+                commands: None,
+            },
+        );
+
+        repos_commands.insert(
+            "issues".to_string(),
+            Command {
+                endpoint: Some("/repos/{owner}/{repo}/issues".to_string()),
+                method: Some(HttpMethod::GET),
+                headers: HashMap::new(),
+                params: HashMap::new(),
+                commands: Some(issues_commands),
             },
         );
 
         commands.insert(
-            "patch-item".to_string(),
+            "repos".to_string(),
             Command {
-                endpoint: "/items/{id}".to_string(),
-                method: HttpMethod::PATCH,
-                headers,
+                endpoint: Some("/repos".to_string()),
+                method: Some(HttpMethod::GET),
+                headers: HashMap::new(),
                 params: HashMap::new(),
+                commands: Some(repos_commands),
             },
         );
 
         ApiDefinition {
-            name: "test".to_string(),
+            name: "github".to_string(),
             version: "1.0.0".to_string(),
-            description: "Test API".to_string(),
-            base_url: "https://api.test.com".to_string(),
+            description: "GitHub API".to_string(),
+            base_url: "https://api.github.com".to_string(),
             commands,
         }
     }
 
     #[test]
-    fn test_call_with_mock_put() {
+    fn test_mock_nested_create_issue() {
         let mut mock = crate::test_utils::MockApiClient::new();
         mock.expect(
-            "update-item",
-            response_ok(serde_json::json!({"updated": true})),
-        );
-
-        let params = make_params(&[("id", "1")]);
-        let response = mock.call("update-item", &params, None).unwrap();
-
-        assert_eq!(response.status, 200);
-        assert_eq!(response.body["updated"], true);
-    }
-
-    #[test]
-    fn test_call_with_mock_delete() {
-        let mut mock = crate::test_utils::MockApiClient::new();
-        mock.expect(
-            "delete-item",
-            response_ok(serde_json::json!({"deleted": true})),
-        );
-
-        let params = make_params(&[("id", "1")]);
-        let response = mock.call("delete-item", &params, None).unwrap();
-
-        assert_eq!(response.status, 200);
-        assert_eq!(response.body["deleted"], true);
-    }
-
-    #[test]
-    fn test_call_with_mock_patch() {
-        let mut mock = crate::test_utils::MockApiClient::new();
-        mock.expect(
-            "patch-item",
-            response_ok(serde_json::json!({"patched": true})),
-        );
-
-        let params = make_params(&[("id", "1")]);
-        let response = mock.call("patch-item", &params, None).unwrap();
-
-        assert_eq!(response.status, 200);
-        assert_eq!(response.body["patched"], true);
-    }
-
-    #[test]
-    fn test_call_with_mock_post() {
-        let mut mock = crate::test_utils::MockApiClient::new();
-        mock.expect(
-            "create-item",
+            "repos.issues.create",
             response_ok(serde_json::json!({"created": true})),
         );
 
-        let body = serde_json::json!({"name": "test"});
+        let params = make_params(&[("owner", "rust-lang"), ("repo", "rust")]);
+        let body = serde_json::json!({"title": "Bug report"});
         let response = mock
-            .call("create-item", &make_params(&[]), Some(&body))
+            .call("repos.issues.create", &params, Some(&body))
             .unwrap();
 
         assert_eq!(response.status, 200);
         assert_eq!(response.body["created"], true);
+    }
+
+    #[test]
+    fn test_mock_nested_list_issues() {
+        let mut mock = crate::test_utils::MockApiClient::new();
+        mock.expect(
+            "repos.issues.list",
+            response_ok(serde_json::json!([{"id": 1}, {"id": 2}])),
+        );
+
+        let params = make_params(&[("owner", "rust-lang"), ("repo", "rust")]);
+        let response = mock.call("repos.issues.list", &params, None).unwrap();
+
+        assert_eq!(response.status, 200);
+        assert!(response.body.is_array());
+    }
+
+    #[test]
+    fn test_mock_nested_command_not_found() {
+        let mut mock = crate::test_utils::MockApiClient::new();
+        let params = make_params(&[("owner", "rust-lang")]);
+        let result = mock.call("repos.issues.nonexistent", &params, None);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_mock_nested_endpoint_resolution_with_params() {
+        let api = create_nested_api_for_mock();
+        let client = YcallrClient::new(api).unwrap();
+        let mut params = HashMap::new();
+        params.insert("owner".to_string(), "rust-lang".to_string());
+        params.insert("repo".to_string(), "rust".to_string());
+        let cmd = client.api.get_command("repos.issues.create").unwrap();
+        let endpoint = cmd.resolve_endpoint(&params).unwrap();
+        assert_eq!(endpoint, "/repos/rust-lang/rust/issues");
+    }
+
+    #[test]
+    fn test_mock_nested_command_lookup() {
+        let api = create_nested_api_for_mock();
+        let client = YcallrClient::new(api).unwrap();
+        let cmd = client.api.get_command("repos.issues").unwrap();
+        assert!(cmd.is_branch());
+        assert!(cmd.is_leaf());
     }
 }

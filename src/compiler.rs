@@ -40,30 +40,48 @@ impl Compiler {
         })
     }
 
-    fn command_to_proto(cmd: &Command) -> proto::Command {
+    pub fn command_to_proto(cmd: &Command) -> proto::Command {
+        let mut commands = std::collections::HashMap::new();
+        if let Some(sub_commands) = &cmd.commands {
+            for (k, v) in sub_commands {
+                commands.insert(k.clone(), Self::command_to_proto(v));
+            }
+        }
+
         proto::Command {
             endpoint: cmd.endpoint.clone(),
-            method: Self::method_to_proto(&cmd.method) as i32,
+            method: cmd.method.as_ref().map(|m| Self::method_to_proto(m) as i32),
             headers: cmd.headers.clone(),
             params: cmd
                 .params
                 .iter()
                 .map(|(k, v)| (k.clone(), Self::param_to_proto(v)))
                 .collect(),
+            commands,
         }
     }
 
-    fn command_from_proto(cmd: &proto::Command) -> Result<Command> {
+    pub fn command_from_proto(cmd: &proto::Command) -> Result<Command> {
         let mut params = std::collections::HashMap::new();
         for (k, v) in &cmd.params {
             params.insert(k.clone(), Self::param_from_proto(v)?);
         }
 
+        let mut commands = std::collections::HashMap::new();
+        for (k, v) in &cmd.commands {
+            commands.insert(k.clone(), Self::command_from_proto(v)?);
+        }
+
         Ok(Command {
             endpoint: cmd.endpoint.clone(),
-            method: Self::method_from_i32(cmd.method),
+            method: cmd.method.map(|m| Self::method_from_i32(m)),
             headers: cmd.headers.clone(),
             params,
+            commands: if commands.is_empty() {
+                None
+            } else {
+                Some(commands)
+            },
         })
     }
 
@@ -158,10 +176,59 @@ mod tests {
         commands.insert(
             "create-issue".to_string(),
             Command {
-                endpoint: "/repos/{owner}/{repo}/issues".to_string(),
-                method: HttpMethod::POST,
+                endpoint: Some("/repos/{owner}/{repo}/issues".to_string()),
+                method: Some(HttpMethod::POST),
                 headers,
                 params,
+                commands: None,
+            },
+        );
+
+        ApiDefinition {
+            name: "github".to_string(),
+            version: "1.0.0".to_string(),
+            description: "GitHub API".to_string(),
+            base_url: "https://api.github.com".to_string(),
+            commands,
+        }
+    }
+
+    fn create_nested_api() -> ApiDefinition {
+        let mut commands = HashMap::new();
+
+        let mut repos_commands = HashMap::new();
+
+        let mut issues_commands = HashMap::new();
+        issues_commands.insert(
+            "create".to_string(),
+            Command {
+                endpoint: Some("/repos/{owner}/{repo}/issues".to_string()),
+                method: Some(HttpMethod::POST),
+                headers: HashMap::new(),
+                params: HashMap::new(),
+                commands: None,
+            },
+        );
+
+        repos_commands.insert(
+            "issues".to_string(),
+            Command {
+                endpoint: Some("/repos/{owner}/{repo}/issues".to_string()),
+                method: Some(HttpMethod::GET),
+                headers: HashMap::new(),
+                params: HashMap::new(),
+                commands: Some(issues_commands),
+            },
+        );
+
+        commands.insert(
+            "repos".to_string(),
+            Command {
+                endpoint: Some("/repos".to_string()),
+                method: Some(HttpMethod::GET),
+                headers: HashMap::new(),
+                params: HashMap::new(),
+                commands: Some(repos_commands),
             },
         );
 
@@ -193,7 +260,7 @@ mod tests {
         let restored = Compiler::proto_to_yaml(&proto_bytes).unwrap();
 
         let cmd = restored.commands.get("create-issue").unwrap();
-        assert_eq!(cmd.method, HttpMethod::POST);
+        assert_eq!(cmd.method.as_ref().unwrap(), &HttpMethod::POST);
         assert!(cmd.headers.contains_key("Accept"));
     }
 
@@ -216,5 +283,40 @@ mod tests {
         assert_eq!(Compiler::type_from_i32(3), ParamType::Array);
         assert_eq!(Compiler::type_from_i32(99), ParamType::String);
         assert_eq!(Compiler::type_from_i32(-1), ParamType::String);
+    }
+
+    #[test]
+    fn test_nested_api_proto_roundtrip() {
+        let api = create_nested_api();
+        let proto_bytes = Compiler::yaml_to_proto(&api).unwrap();
+        let restored = Compiler::proto_to_yaml(&proto_bytes).unwrap();
+
+        assert_eq!(api.name, restored.name);
+        assert_eq!(api.commands.len(), restored.commands.len());
+
+        let repos = restored.commands.get("repos").unwrap();
+        assert!(repos.commands.is_some());
+        assert_eq!(repos.endpoint.as_deref(), Some("/repos"));
+
+        let issues = repos.commands.as_ref().unwrap().get("issues").unwrap();
+        assert!(issues.commands.is_some());
+        assert_eq!(issues.method.as_ref().unwrap(), &HttpMethod::GET);
+
+        let create = issues.commands.as_ref().unwrap().get("create").unwrap();
+        assert_eq!(create.method.as_ref().unwrap(), &HttpMethod::POST);
+        assert_eq!(
+            create.endpoint.as_deref(),
+            Some("/repos/{owner}/{repo}/issues")
+        );
+    }
+
+    #[test]
+    fn test_nested_api_lookup_after_proto() {
+        let api = create_nested_api();
+        let proto_bytes = Compiler::yaml_to_proto(&api).unwrap();
+        let restored = Compiler::proto_to_yaml(&proto_bytes).unwrap();
+
+        let cmd = restored.get_command("repos.issues.create").unwrap();
+        assert_eq!(cmd.method.as_ref().unwrap(), &HttpMethod::POST);
     }
 }
