@@ -20,6 +20,9 @@ pub enum YcallrError {
 
     #[error("Serialization error: {0}")]
     Serialization(String),
+
+    #[error("HTTP client error: {0}")]
+    HttpClient(String),
 }
 
 pub type Result<T> = std::result::Result<T, YcallrError>;
