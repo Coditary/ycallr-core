@@ -32,6 +32,8 @@ pub struct BodyConfig {
     pub form: Option<HashMap<String, String>>,
     #[serde(default)]
     pub multipart: Option<Vec<MultipartField>>,
+    #[serde(default)]
+    pub raw: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

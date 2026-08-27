@@ -16,6 +16,7 @@ serde_yaml = "0.9"
 prost = "0.12"
 thiserror = "1.0"
 regex = "1.10"
+multer = "3"
 
 [build-dependencies]
 prost-build = "0.12"
@@ -41,7 +42,7 @@ uniffi = ["dep:uniffi"]
 
 [dependencies.reqwest]
 version = "0.12"
-features = ["blocking", "json"]
+features = ["blocking", "json", "multipart"]
 optional = true
 
 [dependencies.serde_json]

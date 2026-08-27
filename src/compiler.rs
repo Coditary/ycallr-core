@@ -5,7 +5,6 @@ use crate::models::{
 };
 use crate::proto;
 use prost::Message;
-use std::collections::HashMap;
 
 pub struct Compiler;
 
@@ -151,27 +150,50 @@ impl Compiler {
                     map
                 })
                 .unwrap_or_default(),
+            raw: body.raw.clone(),
+            multipart: body
+                .multipart
+                .as_ref()
+                .map(|fields| {
+                    fields
+                        .iter()
+                        .map(|f| proto::MultipartField {
+                            name: f.name.clone(),
+                            text: f.text.clone(),
+                            file: f.file.clone(),
+                        })
+                        .collect()
+                })
+                .unwrap_or_default(),
         }
     }
 
     fn body_from_proto(body: &proto::BodyConfig) -> BodyConfig {
         BodyConfig {
-            multipart: None,
             json: body
                 .json
                 .as_ref()
                 .and_then(|s| serde_json::from_str(s).ok()),
-            form: body
-                .fields
-                .iter()
-                .next()
-                .map(|m| {
-                    let (k, v) = (m.0.clone(), m.1.clone());
-                    let mut map = HashMap::new();
-                    map.insert(k, v);
-                    Some(map)
-                })
-                .flatten(),
+            form: if body.fields.is_empty() {
+                None
+            } else {
+                Some(body.fields.clone())
+            },
+            raw: body.raw.clone(),
+            multipart: if body.multipart.is_empty() {
+                None
+            } else {
+                Some(
+                    body.multipart
+                        .iter()
+                        .map(|f| crate::models::MultipartField {
+                            name: f.name.clone(),
+                            text: f.text.clone(),
+                            file: f.file.clone(),
+                        })
+                        .collect(),
+                )
+            },
         }
     }
 

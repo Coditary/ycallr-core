@@ -93,6 +93,57 @@ impl YcallrApi {
             .map(|v| v.to_string())
     }
 
+    #[wasm_bindgen(js_name = commandBodyForm)]
+    pub fn command_body_form(&self, name: &str) -> Option<String> {
+        self.inner
+            .get_command(name)
+            .ok()
+            .and_then(|cmd| cmd.body.as_ref())
+            .and_then(|b| b.form.as_ref())
+            .map(|m| serde_json::to_string(m).unwrap_or_default())
+    }
+
+    #[wasm_bindgen(js_name = commandBodyRaw)]
+    pub fn command_body_raw(&self, name: &str) -> Option<String> {
+        self.inner
+            .get_command(name)
+            .ok()
+            .and_then(|cmd| cmd.body.as_ref())
+            .and_then(|b| b.raw.as_ref())
+            .cloned()
+    }
+
+    #[wasm_bindgen(js_name = commandBodyMultipart)]
+    pub fn command_body_multipart(&self, name: &str) -> Option<String> {
+        self.inner
+            .get_command(name)
+            .ok()
+            .and_then(|cmd| cmd.body.as_ref())
+            .and_then(|b| b.multipart.as_ref())
+            .map(|m| serde_json::to_string(m).unwrap_or_default())
+    }
+
+    #[wasm_bindgen(js_name = commandBodyType)]
+    pub fn command_body_type(&self, name: &str) -> Option<String> {
+        self.inner
+            .get_command(name)
+            .ok()
+            .and_then(|cmd| cmd.body.as_ref())
+            .and_then(|b| {
+                if b.json.is_some() {
+                    Some("json".to_string())
+                } else if b.form.is_some() {
+                    Some("form".to_string())
+                } else if b.multipart.is_some() {
+                    Some("multipart".to_string())
+                } else if b.raw.is_some() {
+                    Some("raw".to_string())
+                } else {
+                    None
+                }
+            })
+    }
+
     pub fn to_json(&self) -> std::result::Result<String, JsValue> {
         serde_json::to_string_pretty(&self.inner).map_err(|e| JsValue::from_str(&e.to_string()))
     }

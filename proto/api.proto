@@ -39,6 +39,14 @@ message ResponseEntry {
 message BodyConfig {
   optional string json = 1;
   map<string, string> fields = 2;
+  optional string raw = 3;
+  repeated MultipartField multipart = 4;
+}
+
+message MultipartField {
+  string name = 1;
+  optional string text = 2;
+  optional string file = 3;
 }
 
 message EnvVar {

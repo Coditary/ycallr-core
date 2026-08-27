@@ -206,17 +206,50 @@ impl YcallrClient {
         result
     }
 
-    fn resolve_body_templates(
+    fn resolve_string_templates(&self, text: &str, params: &HashMap<String, String>) -> String {
+        let mut resolved = text.to_string();
+        for (key, val) in params {
+            resolved = resolved.replace(&format!("{{{}}}", key), val);
+        }
+        resolved
+    }
+
+    pub fn resolve_body(
         &self,
         body_config: &crate::models::BodyConfig,
         params: &HashMap<String, String>,
-    ) -> Result<serde_json::Value> {
-        if let Some(json) = &body_config.json {
-            let resolved = self.resolve_json_templates(json, params)?;
-            Ok(resolved)
-        } else {
-            Ok(serde_json::Value::Null)
-        }
+    ) -> Result<crate::models::BodyConfig> {
+        Ok(crate::models::BodyConfig {
+            json: body_config
+                .json
+                .as_ref()
+                .map(|v| self.resolve_json_templates(v, params))
+                .transpose()?,
+            form: body_config.form.as_ref().map(|m| {
+                m.iter()
+                    .map(|(k, v)| {
+                        (
+                            self.resolve_string_templates(k, params),
+                            self.resolve_string_templates(v, params),
+                        )
+                    })
+                    .collect()
+            }),
+            multipart: body_config.multipart.as_ref().map(|fields| {
+                fields
+                    .iter()
+                    .map(|f| crate::models::MultipartField {
+                        name: self.resolve_string_templates(&f.name, params),
+                        text: f.text.as_ref().map(|t| self.resolve_string_templates(t, params)),
+                        file: f.file.clone(),
+                    })
+                    .collect()
+            }),
+            raw: body_config
+                .raw
+                .as_ref()
+                .map(|r| self.resolve_string_templates(r, params)),
+        })
     }
 
     pub fn resolve_json_templates(
@@ -295,21 +328,52 @@ impl YcallrClient {
             }
         }
 
-        let final_body = if let Some(caller_body) = body {
-            Some(caller_body.clone())
-        } else if let Some(body_config) = &cmd.body {
-            let resolved_body = self.resolve_body_templates(body_config, params)?;
-            if resolved_body.is_null() {
+        let resolved_body_config = if let Some(body_config) = &cmd.body {
+            let resolved = self.resolve_body(body_config, params)?;
+            if resolved.json.is_none()
+                && resolved.form.is_none()
+                && resolved.multipart.is_none()
+                && resolved.raw.is_none()
+            {
                 None
             } else {
-                Some(resolved_body)
+                Some(resolved)
             }
         } else {
             None
         };
 
-        if let Some(body) = &final_body {
+        if let Some(body) = body {
             request = request.json(body);
+        } else if let Some(body_config) = &resolved_body_config {
+            if let Some(json) = &body_config.json {
+                request = request.json(json);
+            } else if let Some(form) = &body_config.form {
+                request = request.form(form);
+            } else if let Some(raw) = &body_config.raw {
+                request = request
+                    .header("Content-Type", "text/plain")
+                    .body(raw.clone());
+            } else if let Some(multipart_fields) = &body_config.multipart {
+                let mut form = reqwest::blocking::multipart::Form::new();
+                for field in multipart_fields {
+                    if let Some(text) = &field.text {
+                        form = form.text(field.name.clone(), text.clone());
+                    } else if let Some(file_path) = &field.file {
+                        let path = std::path::Path::new(file_path);
+                        let file_name = path
+                            .file_name()
+                            .map(|n| n.to_string_lossy().to_string())
+                            .unwrap_or_else(|| field.name.clone());
+                        let part = reqwest::blocking::multipart::Part::file(path)
+                            .map_err(|e| YcallrError::HttpClient(e.to_string()))?
+                            .mime_str("application/octet-stream")
+                            .map_err(|e| YcallrError::HttpClient(e.to_string()))?;
+                        form = form.part(file_name, part);
+                    }
+                }
+                request = request.multipart(form);
+            }
         }
 
         let response = request
