@@ -1,131 +1,23 @@
-use crate::error::{Result, YcallrError};
-use crate::models::{ApiDefinition, HttpMethod};
-use regex::Regex;
-use serde::{Deserialize, Serialize};
+mod types;
+mod builder;
+mod templates;
+mod request;
+
+pub use types::*;
+
+use crate::error::Result;
+use crate::models::ApiDefinition;
 use std::collections::HashMap;
 
-#[derive(Debug, Clone)]
-pub enum AuthConfig {
-    Bearer(String),
-    ApiKey { key: String, header: String },
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum EnvMode {
-    Auto,
-    Manual,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ApiResponse {
-    pub status: u16,
-    pub headers: HashMap<String, String>,
-    pub body: serde_json::Value,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub message: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ApiError {
-    pub status: u16,
-    pub message: String,
-    pub body: Option<serde_json::Value>,
-}
-
-pub struct YcallrClientBuilder {
-    api: ApiDefinition,
-    auth: Option<AuthConfig>,
-    env_mode: EnvMode,
-    env_vars: HashMap<String, String>,
-}
-
-impl YcallrClientBuilder {
-    pub fn new(api: ApiDefinition) -> Self {
-        Self {
-            api,
-            auth: None,
-            env_mode: EnvMode::Auto,
-            env_vars: HashMap::new(),
-        }
-    }
-
-    pub fn auth(mut self, auth: AuthConfig) -> Self {
-        self.auth = Some(auth);
-        self
-    }
-
-    pub fn env_mode(mut self, mode: EnvMode) -> Self {
-        self.env_mode = mode;
-        self
-    }
-
-    pub fn env(mut self, key: &str, value: &str) -> Self {
-        self.env_vars.insert(key.to_string(), value.to_string());
-        self
-    }
-
-    pub fn envs(mut self, vars: HashMap<String, String>) -> Self {
-        self.env_vars.extend(vars);
-        self
-    }
-
-    pub fn build(self) -> Result<YcallrClient> {
-        let mut resolved_env = HashMap::new();
-
-        for env_var in &self.api.env {
-            match self.env_mode {
-                EnvMode::Auto => {
-                    if let Ok(val) = std::env::var(&env_var.name) {
-                        resolved_env.insert(env_var.name.clone(), val);
-                    } else if let Some(val) = self.env_vars.get(&env_var.name) {
-                        resolved_env.insert(env_var.name.clone(), val.clone());
-                    }
-                }
-                EnvMode::Manual => {
-                    if let Some(val) = self.env_vars.get(&env_var.name) {
-                        resolved_env.insert(env_var.name.clone(), val.clone());
-                    }
-                }
-            }
-        }
-
-        for (key, value) in &self.env_vars {
-            resolved_env
-                .entry(key.clone())
-                .or_insert_with(|| value.clone());
-        }
-
-        for env_var in &self.api.env {
-            if env_var.required && !resolved_env.contains_key(&env_var.name) {
-                return Err(YcallrError::EnvVar(format!(
-                    "Required environment variable '{}' is not set",
-                    env_var.name
-                )));
-            }
-        }
-
-        let http_client = reqwest::blocking::Client::builder()
-            .timeout(std::time::Duration::from_secs(30))
-            .build()
-            .map_err(|e| YcallrError::HttpClient(e.to_string()))?;
-
-        Ok(YcallrClient {
-            api: self.api,
-            http_client,
-            auth: self.auth,
-            env_mode: self.env_mode,
-            env_vars: resolved_env,
-        })
-    }
-}
+use builder::YcallrClientBuilder;
 
 #[derive(Debug)]
 pub struct YcallrClient {
-    api: ApiDefinition,
-    http_client: reqwest::blocking::Client,
-    auth: Option<AuthConfig>,
-    env_mode: EnvMode,
-    env_vars: HashMap<String, String>,
+    pub(crate) api: ApiDefinition,
+    pub(crate) http_client: reqwest::blocking::Client,
+    pub(crate) auth: Option<AuthConfig>,
+    pub(crate) env_mode: EnvMode,
+    pub(crate) env_vars: HashMap<String, String>,
 }
 
 impl YcallrClient {
@@ -153,65 +45,8 @@ impl YcallrClient {
         self.env_vars.get(key).map(|s| s.as_str())
     }
 
-    fn resolve_env_vars(&self, text: &str) -> Result<String> {
-        let re = Regex::new(r"\$\{([^}]+)\}").unwrap();
-        let mut result = text.to_string();
-
-        for cap in re.captures_iter(text) {
-            let var_name = &cap[1];
-            let replacement = self
-                .env_vars
-                .get(var_name)
-                .map(|s| s.as_str())
-                .unwrap_or("");
-            result = result.replace(&cap[0], replacement);
-        }
-
-        Ok(result)
-    }
-
-    fn resolve_response_template(
-        template: &str,
-        params: &HashMap<String, String>,
-        body: &serde_json::Value,
-    ) -> String {
-        let re = Regex::new(r"\{(input|output)\.([^}]+)\}").unwrap();
-        let mut result = template.to_string();
-
-        for cap in re.captures_iter(template) {
-            let prefix = &cap[1];
-            let field = &cap[2];
-
-            let replacement = match prefix {
-                "input" => params.get(field).map(|s| s.as_str()).unwrap_or(""),
-                "output" => {
-                    if let Some(val) = body.get(field) {
-                        match val {
-                            serde_json::Value::String(s) => s.as_str(),
-                            other => {
-                                let s = other.to_string();
-                                return result.replace(&cap[0], &s);
-                            }
-                        }
-                    } else {
-                        ""
-                    }
-                }
-                _ => "",
-            };
-
-            result = result.replace(&cap[0], replacement);
-        }
-
-        result
-    }
-
-    fn resolve_string_templates(&self, text: &str, params: &HashMap<String, String>) -> String {
-        let mut resolved = text.to_string();
-        for (key, val) in params {
-            resolved = resolved.replace(&format!("{{{}}}", key), val);
-        }
-        resolved
+    pub fn resolve_env_vars(&self, text: &str) -> Result<String> {
+        templates::resolve_env_vars(text, &self.env_vars)
     }
 
     pub fn resolve_body(
@@ -219,37 +54,7 @@ impl YcallrClient {
         body_config: &crate::models::BodyConfig,
         params: &HashMap<String, String>,
     ) -> Result<crate::models::BodyConfig> {
-        Ok(crate::models::BodyConfig {
-            json: body_config
-                .json
-                .as_ref()
-                .map(|v| self.resolve_json_templates(v, params))
-                .transpose()?,
-            form: body_config.form.as_ref().map(|m| {
-                m.iter()
-                    .map(|(k, v)| {
-                        (
-                            self.resolve_string_templates(k, params),
-                            self.resolve_string_templates(v, params),
-                        )
-                    })
-                    .collect()
-            }),
-            multipart: body_config.multipart.as_ref().map(|fields| {
-                fields
-                    .iter()
-                    .map(|f| crate::models::MultipartField {
-                        name: self.resolve_string_templates(&f.name, params),
-                        text: f.text.as_ref().map(|t| self.resolve_string_templates(t, params)),
-                        file: f.file.clone(),
-                    })
-                    .collect()
-            }),
-            raw: body_config
-                .raw
-                .as_ref()
-                .map(|r| self.resolve_string_templates(r, params)),
-        })
+        templates::resolve_body(body_config, params)
     }
 
     pub fn resolve_json_templates(
@@ -257,30 +62,7 @@ impl YcallrClient {
         value: &serde_json::Value,
         params: &HashMap<String, String>,
     ) -> Result<serde_json::Value> {
-        match value {
-            serde_json::Value::String(s) => {
-                let mut resolved = s.clone();
-                for (key, val) in params {
-                    resolved = resolved.replace(&format!("{{{}}}", key), val);
-                }
-                Ok(serde_json::Value::String(resolved))
-            }
-            serde_json::Value::Array(arr) => {
-                let mut resolved = Vec::new();
-                for item in arr {
-                    resolved.push(self.resolve_json_templates(item, params)?);
-                }
-                Ok(serde_json::Value::Array(resolved))
-            }
-            serde_json::Value::Object(map) => {
-                let mut resolved = serde_json::Map::new();
-                for (k, v) in map {
-                    resolved.insert(k.clone(), self.resolve_json_templates(v, params)?);
-                }
-                Ok(serde_json::Value::Object(resolved))
-            }
-            other => Ok(other.clone()),
-        }
+        templates::resolve_json_templates(value, params)
     }
 
     pub fn call(
@@ -289,132 +71,7 @@ impl YcallrClient {
         params: &HashMap<String, String>,
         body: Option<&serde_json::Value>,
     ) -> Result<ApiResponse> {
-        let cmd = self.api.get_command(command)?;
-
-        let endpoint = cmd.resolve_endpoint(params)?;
-        let resolved_endpoint = self.resolve_env_vars(&endpoint)?;
-        let url = format!(
-            "{}{}",
-            self.api.base_url.trim_end_matches('/'),
-            resolved_endpoint
-        );
-
-        let method = cmd
-            .method
-            .as_ref()
-            .ok_or_else(|| YcallrError::ParamValidation("Command has no method".into()))?;
-
-        let mut request = match method {
-            HttpMethod::GET => self.http_client.get(&url),
-            HttpMethod::POST => self.http_client.post(&url),
-            HttpMethod::PUT => self.http_client.put(&url),
-            HttpMethod::DELETE => self.http_client.delete(&url),
-            HttpMethod::PATCH => self.http_client.patch(&url),
-        };
-
-        for (key, value) in &cmd.headers {
-            let resolved_value = self.resolve_env_vars(value)?;
-            request = request.header(key.as_str(), resolved_value.as_str());
-        }
-
-        if let Some(auth) = &self.auth {
-            match auth {
-                AuthConfig::Bearer(token) => {
-                    request = request.bearer_auth(token);
-                }
-                AuthConfig::ApiKey { key, header } => {
-                    request = request.header(header.as_str(), key.as_str());
-                }
-            }
-        }
-
-        let resolved_body_config = if let Some(body_config) = &cmd.body {
-            let resolved = self.resolve_body(body_config, params)?;
-            if resolved.json.is_none()
-                && resolved.form.is_none()
-                && resolved.multipart.is_none()
-                && resolved.raw.is_none()
-            {
-                None
-            } else {
-                Some(resolved)
-            }
-        } else {
-            None
-        };
-
-        if let Some(body) = body {
-            request = request.json(body);
-        } else if let Some(body_config) = &resolved_body_config {
-            if let Some(json) = &body_config.json {
-                request = request.json(json);
-            } else if let Some(form) = &body_config.form {
-                request = request.form(form);
-            } else if let Some(raw) = &body_config.raw {
-                request = request
-                    .header("Content-Type", "text/plain")
-                    .body(raw.clone());
-            } else if let Some(multipart_fields) = &body_config.multipart {
-                let mut form = reqwest::blocking::multipart::Form::new();
-                for field in multipart_fields {
-                    if let Some(text) = &field.text {
-                        form = form.text(field.name.clone(), text.clone());
-                    } else if let Some(file_path) = &field.file {
-                        let path = std::path::Path::new(file_path);
-                        let file_name = path
-                            .file_name()
-                            .map(|n| n.to_string_lossy().to_string())
-                            .unwrap_or_else(|| field.name.clone());
-                        let part = reqwest::blocking::multipart::Part::file(path)
-                            .map_err(|e| YcallrError::HttpClient(e.to_string()))?
-                            .mime_str("application/octet-stream")
-                            .map_err(|e| YcallrError::HttpClient(e.to_string()))?;
-                        form = form.part(file_name, part);
-                    }
-                }
-                request = request.multipart(form);
-            }
-        }
-
-        let response = request
-            .send()
-            .map_err(|e| YcallrError::HttpClient(e.to_string()))?;
-
-        let status = response.status().as_u16();
-
-        let headers: HashMap<String, String> = response
-            .headers()
-            .iter()
-            .filter_map(|(k, v)| v.to_str().ok().map(|val| (k.to_string(), val.to_string())))
-            .collect();
-
-        let body_text = response
-            .text()
-            .map_err(|e| YcallrError::HttpClient(e.to_string()))?;
-
-        let body_json: serde_json::Value = serde_json::from_str(&body_text)
-            .unwrap_or_else(|_| serde_json::Value::String(body_text));
-
-        let message = if let Some(responses) = &cmd.responses {
-            if let Some(entry) = responses.get_entry_for_status(status) {
-                Some(Self::resolve_response_template(
-                    &entry.message,
-                    params,
-                    &body_json,
-                ))
-            } else {
-                None
-            }
-        } else {
-            None
-        };
-
-        Ok(ApiResponse {
-            status,
-            headers,
-            body: body_json,
-            message,
-        })
+        request::call(self, command, params, body)
     }
 
     pub fn api(&self) -> &ApiDefinition {
@@ -426,6 +83,8 @@ impl YcallrClient {
 mod tests {
     use super::*;
     use crate::models::{Command, ParamType, Parameter, ResponseConfig, ResponseEntry};
+    use crate::client::{AuthConfig, EnvMode};
+    use crate::HttpMethod;
 
     fn create_test_api() -> ApiDefinition {
         let mut commands = HashMap::new();
@@ -880,50 +539,6 @@ mod tests {
     }
 
     #[test]
-    fn test_resolve_response_template_input() {
-        let mut params = HashMap::new();
-        params.insert("owner".to_string(), "rust-lang".to_string());
-        let body = serde_json::json!({});
-
-        let result =
-            YcallrClient::resolve_response_template("{input.owner} not found", &params, &body);
-        assert_eq!(result, "rust-lang not found");
-    }
-
-    #[test]
-    fn test_resolve_response_template_output() {
-        let params = HashMap::new();
-        let body = serde_json::json!({"name": "rust", "stars": 90000});
-
-        let result = YcallrClient::resolve_response_template(
-            "Got repo {output.name} with {output.stars} stars",
-            &params,
-            &body,
-        );
-        assert_eq!(result, "Got repo rust with 90000 stars");
-    }
-
-    #[test]
-    fn test_resolve_response_template_mixed() {
-        let mut params = HashMap::new();
-        params.insert("owner".to_string(), "rust-lang".to_string());
-        let body = serde_json::json!({"name": "rust"});
-
-        let result =
-            YcallrClient::resolve_response_template("{input.owner}/{output.name}", &params, &body);
-        assert_eq!(result, "rust-lang/rust");
-    }
-
-    #[test]
-    fn test_resolve_response_template_missing_field() {
-        let params = HashMap::new();
-        let body = serde_json::json!({"name": "rust"});
-
-        let result = YcallrClient::resolve_response_template("{output.missing}", &params, &body);
-        assert_eq!(result, "");
-    }
-
-    #[test]
     fn test_response_api_parsing() {
         let api = create_response_api();
         let cmd = api.commands.get("get-repo").unwrap();
@@ -948,6 +563,7 @@ mod tests {
 mod client_integration_tests {
     use super::*;
     use crate::models::{Command, ResponseConfig, ResponseEntry};
+    use crate::HttpMethod;
     use crate::test_utils::{make_params, response_ok};
 
     fn create_response_test_api(base_url: &str) -> ApiDefinition {
