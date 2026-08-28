@@ -4,10 +4,12 @@ language = "C"
 parse_deps = false
 exclude = []
 
+[defines]
+"feature ffi" = "FEATURE_FFI"
+"feature client" = "FEATURE_CLIENT"
+"feature yaml" = "FEATURE_YAML"
+"feature protobuf" = "FEATURE_PROTOBUF"
+
 [export]
 include = []
 exclude = []
-item_types = ["struct", "enum", "union", "typedef", "function", "constant"]
-prefix = ""
-
-[export.rename]

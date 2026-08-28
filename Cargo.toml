@@ -38,7 +38,7 @@ yaml = []
 protobuf = []
 client = ["dep:reqwest"]
 test-utils = ["client"]
-ffi = []
+ffi = ["client", "yaml"]
 wasm = ["dep:wasm-bindgen"]
 uniffi = ["dep:uniffi"]
 
