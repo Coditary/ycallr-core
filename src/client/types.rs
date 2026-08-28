@@ -1,11 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-#[derive(Debug, Clone)]
-pub enum AuthConfig {
-    Bearer(String),
-    ApiKey { key: String, header: String },
-}
+pub use crate::models::AuthConfig;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum EnvMode {

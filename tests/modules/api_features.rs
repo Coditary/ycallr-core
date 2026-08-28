@@ -9,6 +9,7 @@ fn test_api_validation() {
         description: "Test".to_string(),
         base_url: "https://api.test.com".to_string(),
         env: vec![],
+        auth: HashMap::new(),
         commands: HashMap::new(),
     };
     assert!(valid_api.validate().is_ok());
@@ -19,6 +20,7 @@ fn test_api_validation() {
         description: "Test".to_string(),
         base_url: "https://api.test.com".to_string(),
         env: vec![],
+        auth: HashMap::new(),
         commands: HashMap::new(),
     };
     assert!(invalid_api.validate().is_err());

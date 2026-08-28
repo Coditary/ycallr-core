@@ -1,5 +1,5 @@
 use crate::error::{Result, YcallrError};
-use crate::models::HttpMethod;
+use crate::models::{ApiKeyLocation, HttpMethod};
 use std::collections::HashMap;
 
 use super::templates;
@@ -16,7 +16,7 @@ pub fn call(
 
     let endpoint = cmd.resolve_endpoint(params)?;
     let resolved_endpoint = templates::resolve_env_vars(&endpoint, &client.env_vars)?;
-    let url = format!(
+    let mut url = format!(
         "{}{}",
         client.api.base_url.trim_end_matches('/'),
         resolved_endpoint
@@ -40,13 +40,92 @@ pub fn call(
         request = request.header(key.as_str(), resolved_value.as_str());
     }
 
-    if let Some(auth) = &client.auth {
+    let auth_config = cmd.auth.as_ref()
+        .and_then(|name| client.get_auth_config(name))
+        .or(client.auth.as_ref());
+
+    if let Some(auth) = auth_config {
         match auth {
-            AuthConfig::Bearer(token) => {
-                request = request.bearer_auth(token);
+            AuthConfig::Bearer { token } => {
+                let resolved_token = templates::resolve_env_vars(token, &client.env_vars)?;
+                request = request.bearer_auth(&resolved_token);
             }
-            AuthConfig::ApiKey { key, header } => {
-                request = request.header(header.as_str(), key.as_str());
+            AuthConfig::ApiKey { key, name, in_ } => {
+                let resolved_key = templates::resolve_env_vars(key, &client.env_vars)?;
+                let resolved_name = templates::resolve_env_vars(name, &client.env_vars)?;
+                match in_ {
+                    ApiKeyLocation::Header => {
+                        request = request.header(resolved_name.as_str(), resolved_key.as_str());
+                    }
+                    ApiKeyLocation::Query => {
+                        let separator = if url.contains('?') { "&" } else { "?" };
+                        url = format!("{}{}{}={}", url, separator, resolved_name, resolved_key);
+                        request = match method {
+                            HttpMethod::GET => client.http_client.get(&url),
+                            HttpMethod::POST => client.http_client.post(&url),
+                            HttpMethod::PUT => client.http_client.put(&url),
+                            HttpMethod::DELETE => client.http_client.delete(&url),
+                            HttpMethod::PATCH => client.http_client.patch(&url),
+                        };
+                    }
+                    ApiKeyLocation::Cookie => {
+                        request = request.header(
+                            "Cookie",
+                            format!("{}={}", resolved_name, resolved_key).as_str(),
+                        );
+                    }
+                }
+            }
+            AuthConfig::Http {
+                scheme,
+                token,
+                username,
+                password,
+                prefix,
+            } => {
+                let resolved_token = token
+                    .as_ref()
+                    .map(|t| templates::resolve_env_vars(t, &client.env_vars))
+                    .transpose()?;
+                let resolved_prefix = prefix
+                    .as_ref()
+                    .map(|p| templates::resolve_env_vars(p, &client.env_vars))
+                    .transpose()?;
+
+                match scheme.to_lowercase().as_str() {
+                    "bearer" => {
+                        if let Some(t) = &resolved_token {
+                            request = request.bearer_auth(t);
+                        }
+                    }
+                    "basic" => {
+                        let resolved_user = username
+                            .as_ref()
+                            .map(|u| templates::resolve_env_vars(u, &client.env_vars))
+                            .transpose()?;
+                        let resolved_pass = password
+                            .as_ref()
+                            .map(|p| templates::resolve_env_vars(p, &client.env_vars))
+                            .transpose()?;
+                        if let (Some(user), Some(pass)) = (&resolved_user, &resolved_pass) {
+                            use base64::Engine;
+                            let credentials = format!("{}:{}", user, pass);
+                            let encoded = base64::engine::general_purpose::STANDARD.encode(credentials);
+                            request = request.header("Authorization", format!("Basic {}", encoded));
+                        }
+                    }
+                    "custom" => {
+                        if let (Some(p), Some(t)) = (&resolved_prefix, &resolved_token) {
+                            request = request.header("Authorization", format!("{}{}", p, t));
+                        }
+                    }
+                    _ => {
+                        if let Some(t) = &resolved_token {
+                            let scheme_upper = scheme.to_uppercase();
+                            request = request.header("Authorization", format!("{} {}", scheme_upper, t));
+                        }
+                    }
+                }
             }
         }
     }

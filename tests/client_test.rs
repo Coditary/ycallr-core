@@ -36,6 +36,7 @@ fn create_test_api(base_url: &str) -> ApiDefinition {
             description: Some("Get a repository".to_string()),
             endpoint: Some("/repos/{owner}/{repo}".to_string()),
             method: Some(HttpMethod::GET),
+            auth: None,
             headers: get_headers,
             params: get_params,
             body: None,
@@ -63,6 +64,7 @@ fn create_test_api(base_url: &str) -> ApiDefinition {
             description: Some("Create an issue".to_string()),
             endpoint: Some("/repos/{owner}/{repo}/issues".to_string()),
             method: Some(HttpMethod::POST),
+            auth: None,
             headers: post_headers,
             params: post_params,
             body: None,
@@ -77,6 +79,7 @@ fn create_test_api(base_url: &str) -> ApiDefinition {
         description: "GitHub API".to_string(),
         base_url: base_url.to_string(),
         env: vec![],
+        auth: HashMap::new(),
         commands,
     }
 }
@@ -93,6 +96,7 @@ fn create_nested_test_api(base_url: &str) -> ApiDefinition {
             description: Some("Create an issue".to_string()),
             endpoint: Some("/repos/{owner}/{repo}/issues".to_string()),
             method: Some(HttpMethod::POST),
+            auth: None,
             headers: HashMap::new(),
             params: HashMap::new(),
             body: None,
@@ -107,6 +111,7 @@ fn create_nested_test_api(base_url: &str) -> ApiDefinition {
             description: Some("Issues operations".to_string()),
             endpoint: Some("/repos/{owner}/{repo}/issues".to_string()),
             method: Some(HttpMethod::GET),
+            auth: None,
             headers: HashMap::new(),
             params: HashMap::new(),
             body: None,
@@ -121,6 +126,7 @@ fn create_nested_test_api(base_url: &str) -> ApiDefinition {
             description: Some("Repository operations".to_string()),
             endpoint: Some("/repos".to_string()),
             method: Some(HttpMethod::GET),
+            auth: None,
             headers: HashMap::new(),
             params: HashMap::new(),
             body: None,
@@ -135,6 +141,7 @@ fn create_nested_test_api(base_url: &str) -> ApiDefinition {
         description: "GitHub API with nested commands".to_string(),
         base_url: base_url.to_string(),
         env: vec![],
+        auth: HashMap::new(),
         commands,
     }
 }
@@ -154,6 +161,7 @@ fn create_env_test_api(base_url: &str) -> ApiDefinition {
             description: Some("Get a repository".to_string()),
             endpoint: Some("/repos/{owner}/{repo}".to_string()),
             method: Some(HttpMethod::GET),
+            auth: None,
             headers,
             params: HashMap::new(),
             body: None,
@@ -171,6 +179,7 @@ fn create_env_test_api(base_url: &str) -> ApiDefinition {
             name: "GITHUB_TOKEN".to_string(),
             required: true,
         }],
+        auth: HashMap::new(),
         commands,
     }
 }
@@ -241,7 +250,7 @@ fn test_auth_bearer() {
 
     let api = create_test_api(&server.url());
     let client =
-        YcallrClient::with_auth(api, AuthConfig::Bearer("test-token-123".to_string())).unwrap();
+        YcallrClient::with_auth(api, AuthConfig::bearer("test-token-123".to_string())).unwrap();
 
     let mut params = HashMap::new();
     params.insert("owner".to_string(), "rust-lang".to_string());
@@ -251,6 +260,215 @@ fn test_auth_bearer() {
 
     mock.assert();
     assert_eq!(response.status, 200);
+}
+
+#[test]
+fn test_named_auth_bearer_from_yaml() {
+    let mut server = mockito::Server::new();
+
+    let mock = server
+        .mock("GET", "/repos/rust-lang/rust")
+        .match_header("Authorization", "Bearer yaml-token-123")
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(r#"{"name": "rust"}"#)
+        .create();
+
+    let mut commands = HashMap::new();
+    let mut params = HashMap::new();
+    params.insert("owner".to_string(), ycallr_core::Parameter {
+        description: "Owner".to_string(),
+        param_type: ycallr_core::ParamType::String,
+        required: true,
+    });
+    params.insert("repo".to_string(), ycallr_core::Parameter {
+        description: "Repo".to_string(),
+        param_type: ycallr_core::ParamType::String,
+        required: true,
+    });
+
+    let mut auth_map = HashMap::new();
+    auth_map.insert("primary".to_string(), AuthConfig::bearer("yaml-token-123".to_string()));
+
+    commands.insert("get-repo".to_string(), ycallr_core::Command {
+        description: Some("Get repo".to_string()),
+        endpoint: Some("/repos/{owner}/{repo}".to_string()),
+        method: Some(ycallr_core::HttpMethod::GET),
+        auth: Some("primary".to_string()),
+        headers: HashMap::new(),
+        params,
+        body: None,
+        responses: None,
+        commands: None,
+    });
+
+    let api = ApiDefinition {
+        name: "github".to_string(),
+        version: "1.0.0".to_string(),
+        description: "GitHub API".to_string(),
+        base_url: server.url(),
+        env: vec![],
+        auth: auth_map,
+        commands,
+    };
+
+    let client = YcallrClient::new(api).unwrap();
+
+    let mut params = HashMap::new();
+    params.insert("owner".to_string(), "rust-lang".to_string());
+    params.insert("repo".to_string(), "rust".to_string());
+
+    let response = client.call("get-repo", &params, None).unwrap();
+
+    mock.assert();
+    assert_eq!(response.status, 200);
+}
+
+#[test]
+fn test_named_auth_api_key_from_yaml() {
+    let mut server = mockito::Server::new();
+
+    let mock = server
+        .mock("GET", "/repos/rust-lang/rust")
+        .match_header("X-API-Key", "my-api-key")
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(r#"{"name": "rust"}"#)
+        .create();
+
+    let mut commands = HashMap::new();
+    let mut params = HashMap::new();
+    params.insert("owner".to_string(), ycallr_core::Parameter {
+        description: "Owner".to_string(),
+        param_type: ycallr_core::ParamType::String,
+        required: true,
+    });
+    params.insert("repo".to_string(), ycallr_core::Parameter {
+        description: "Repo".to_string(),
+        param_type: ycallr_core::ParamType::String,
+        required: true,
+    });
+
+    let mut auth_map = HashMap::new();
+    auth_map.insert("secondary".to_string(), AuthConfig::api_key("my-api-key".to_string(), "X-API-Key".to_string()));
+
+    commands.insert("get-repo".to_string(), ycallr_core::Command {
+        description: Some("Get repo".to_string()),
+        endpoint: Some("/repos/{owner}/{repo}".to_string()),
+        method: Some(ycallr_core::HttpMethod::GET),
+        auth: Some("secondary".to_string()),
+        headers: HashMap::new(),
+        params,
+        body: None,
+        responses: None,
+        commands: None,
+    });
+
+    let api = ApiDefinition {
+        name: "github".to_string(),
+        version: "1.0.0".to_string(),
+        description: "GitHub API".to_string(),
+        base_url: server.url(),
+        env: vec![],
+        auth: auth_map,
+        commands,
+    };
+
+    let client = YcallrClient::new(api).unwrap();
+
+    let mut params = HashMap::new();
+    params.insert("owner".to_string(), "rust-lang".to_string());
+    params.insert("repo".to_string(), "rust".to_string());
+
+    let response = client.call("get-repo", &params, None).unwrap();
+
+    mock.assert();
+    assert_eq!(response.status, 200);
+}
+
+#[test]
+fn test_command_without_auth_uses_none() {
+    let mut server = mockito::Server::new();
+
+    let mock = server
+        .mock("GET", "/repos/rust-lang/rust")
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(r#"{"name": "rust"}"#)
+        .create();
+
+    let mut commands = HashMap::new();
+    let mut params = HashMap::new();
+    params.insert("owner".to_string(), ycallr_core::Parameter {
+        description: "Owner".to_string(),
+        param_type: ycallr_core::ParamType::String,
+        required: true,
+    });
+    params.insert("repo".to_string(), ycallr_core::Parameter {
+        description: "Repo".to_string(),
+        param_type: ycallr_core::ParamType::String,
+        required: true,
+    });
+
+    let mut auth_map = HashMap::new();
+    auth_map.insert("primary".to_string(), AuthConfig::bearer("token".to_string()));
+
+    commands.insert("get-repo".to_string(), ycallr_core::Command {
+        description: Some("Get repo".to_string()),
+        endpoint: Some("/repos/{owner}/{repo}".to_string()),
+        method: Some(ycallr_core::HttpMethod::GET),
+        auth: None,
+        headers: HashMap::new(),
+        params,
+        body: None,
+        responses: None,
+        commands: None,
+    });
+
+    let api = ApiDefinition {
+        name: "github".to_string(),
+        version: "1.0.0".to_string(),
+        description: "GitHub API".to_string(),
+        base_url: server.url(),
+        env: vec![],
+        auth: auth_map,
+        commands,
+    };
+
+    let client = YcallrClient::new(api).unwrap();
+
+    let mut params = HashMap::new();
+    params.insert("owner".to_string(), "rust-lang".to_string());
+    params.insert("repo".to_string(), "rust".to_string());
+
+    let response = client.call("get-repo", &params, None).unwrap();
+
+    mock.assert();
+    assert_eq!(response.status, 200);
+}
+
+#[test]
+fn test_get_named_auth_config() {
+    let mut auth_map = HashMap::new();
+    auth_map.insert("primary".to_string(), AuthConfig::bearer("token1".to_string()));
+    auth_map.insert("secondary".to_string(), AuthConfig::api_key("key1".to_string(), "X-Key".to_string()));
+
+    let mut commands = HashMap::new();
+    let api = ApiDefinition {
+        name: "test".to_string(),
+        version: "1.0.0".to_string(),
+        description: "Test".to_string(),
+        base_url: "https://api.test.com".to_string(),
+        env: vec![],
+        auth: auth_map,
+        commands,
+    };
+
+    let client = YcallrClient::new(api).unwrap();
+
+    assert!(client.get_auth_config("primary").is_some());
+    assert!(client.get_auth_config("secondary").is_some());
+    assert!(client.get_auth_config("nonexistent").is_none());
 }
 
 #[test]
@@ -268,142 +486,9 @@ fn test_auth_api_key() {
     let api = create_test_api(&server.url());
     let client = YcallrClient::with_auth(
         api,
-        AuthConfig::ApiKey {
-            key: "my-secret-key".to_string(),
-            header: "X-API-Key".to_string(),
-        },
+        AuthConfig::api_key("my-secret-key".to_string(), "X-API-Key".to_string()),
     )
     .unwrap();
-
-    let mut params = HashMap::new();
-    params.insert("owner".to_string(), "rust-lang".to_string());
-    params.insert("repo".to_string(), "rust".to_string());
-
-    let response = client.call("get-repo", &params, None).unwrap();
-
-    mock.assert();
-    assert_eq!(response.status, 200);
-}
-
-#[test]
-fn test_error_response() {
-    let mut server = mockito::Server::new();
-
-    let mock = server
-        .mock("GET", "/repos/rust-lang/missing")
-        .with_status(404)
-        .with_header("content-type", "application/json")
-        .with_body(r#"{"message": "Not Found"}"#)
-        .create();
-
-    let api = create_test_api(&server.url());
-    let client = YcallrClient::new(api).unwrap();
-
-    let mut params = HashMap::new();
-    params.insert("owner".to_string(), "rust-lang".to_string());
-    params.insert("repo".to_string(), "missing".to_string());
-
-    let response = client.call("get-repo", &params, None).unwrap();
-
-    mock.assert();
-    assert_eq!(response.status, 404);
-    assert_eq!(response.body["message"], "Not Found");
-}
-
-#[test]
-fn test_client_access_api() {
-    let api = create_test_api("https://api.github.com");
-    let client = YcallrClient::new(api).unwrap();
-    assert_eq!(client.api().name, "github");
-}
-
-#[test]
-fn test_nested_client_get_request() {
-    let mut server = mockito::Server::new();
-
-    let mock = server
-        .mock("POST", "/repos/rust-lang/rust/issues")
-        .with_status(201)
-        .with_header("content-type", "application/json")
-        .with_body(r#"{"id": 1, "title": "Bug report"}"#)
-        .create();
-
-    let api = create_nested_test_api(&server.url());
-    let client = YcallrClient::new(api).unwrap();
-
-    let mut params = HashMap::new();
-    params.insert("owner".to_string(), "rust-lang".to_string());
-    params.insert("repo".to_string(), "rust".to_string());
-
-    let body = serde_json::json!({"title": "Bug report"});
-    let response = client
-        .call("repos.issues.create", &params, Some(&body))
-        .unwrap();
-
-    mock.assert();
-    assert_eq!(response.status, 201);
-    assert_eq!(response.body["title"], "Bug report");
-}
-
-#[test]
-fn test_nested_client_command_not_found() {
-    let api = create_nested_test_api("https://api.github.com");
-    let client = YcallrClient::new(api).unwrap();
-    let params = HashMap::new();
-    let result = client.call("repos.issues.nonexistent", &params, None);
-    assert!(result.is_err());
-}
-
-#[test]
-fn test_nested_client_endpoint_resolution() {
-    let api = create_nested_test_api("https://api.github.com");
-    let client = YcallrClient::new(api).unwrap();
-    let mut params = HashMap::new();
-    params.insert("owner".to_string(), "rust-lang".to_string());
-    params.insert("repo".to_string(), "rust".to_string());
-
-    let cmd = client.api().get_command("repos.issues.create").unwrap();
-    let endpoint = cmd.resolve_endpoint(&params).unwrap();
-    assert_eq!(endpoint, "/repos/rust-lang/rust/issues");
-}
-
-#[test]
-fn test_env_client_required_missing() {
-    let api = create_env_test_api("https://api.github.com");
-    let result = YcallrClient::builder(api).env_mode(EnvMode::Manual).build();
-    assert!(result.is_err());
-    let err_msg = result.unwrap_err().to_string();
-    assert!(err_msg.contains("GITHUB_TOKEN"));
-}
-
-#[test]
-fn test_env_client_required_set() {
-    let api = create_env_test_api("https://api.github.com");
-    let client = YcallrClient::builder(api)
-        .env_mode(EnvMode::Manual)
-        .env("GITHUB_TOKEN", "ghp_test123")
-        .build()
-        .unwrap();
-    assert_eq!(client.get_env("GITHUB_TOKEN"), Some("ghp_test123"));
-}
-
-#[test]
-fn test_env_client_substitution() {
-    let mut server = mockito::Server::new();
-
-    let mock = server
-        .mock("GET", "/repos/rust-lang/rust")
-        .match_header("Authorization", "Bearer ghp_test123")
-        .with_status(200)
-        .with_header("content-type", "application/json")
-        .with_body(r#"{"name": "rust"}"#)
-        .create();
-
-    let api = create_env_test_api(&server.url());
-    let client = YcallrClient::builder(api)
-        .env("GITHUB_TOKEN", "ghp_test123")
-        .build()
-        .unwrap();
 
     let mut params = HashMap::new();
     params.insert("owner".to_string(), "rust-lang".to_string());

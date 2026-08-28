@@ -2330,6 +2330,7 @@ name = "ycallr-core"
 version = "0.1.0"
 dependencies = [
  "assert_cmd",
+ "base64",
  "mockito",
  "multer",
  "predicates",

@@ -43,6 +43,7 @@ pub fn command_from_proto(cmd: &proto::Command) -> Result<Command> {
         description: cmd.description.clone(),
         endpoint: cmd.endpoint.clone(),
         method: cmd.method.map(|m| method_from_i32(m)),
+        auth: None,
         headers: cmd.headers.clone(),
         params,
         body: cmd.body.as_ref().map(body_from_proto),

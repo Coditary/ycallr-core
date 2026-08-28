@@ -28,4 +28,4 @@ pub use error::{Result, YcallrError};
 pub use models::*;
 
 #[cfg(feature = "client")]
-pub use client::{ApiError, ApiResponse, AuthConfig, YcallrClient};
+pub use client::{ApiError, ApiResponse, YcallrClient};

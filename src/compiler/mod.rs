@@ -4,6 +4,7 @@ use crate::error::{Result, YcallrError};
 use crate::models::ApiDefinition;
 use crate::proto;
 use prost::Message;
+use std::collections::HashMap;
 
 use conversions::{command_from_proto, command_to_proto, env_from_proto, env_to_proto};
 
@@ -44,6 +45,7 @@ impl Compiler {
             description: proto_api.description,
             base_url: proto_api.base_url,
             env,
+            auth: HashMap::new(),
             commands,
         })
     }
@@ -91,6 +93,7 @@ mod tests {
                 description: Some("Create an issue".to_string()),
                 endpoint: Some("/repos/{owner}/{repo}/issues".to_string()),
                 method: Some(HttpMethod::POST),
+                auth: None,
                 headers,
                 params,
                 body: None,
@@ -105,6 +108,7 @@ mod tests {
             description: "GitHub API".to_string(),
             base_url: "https://api.github.com".to_string(),
             env: vec![],
+            auth: HashMap::new(),
             commands,
         }
     }
@@ -121,6 +125,7 @@ mod tests {
                 description: Some("Create an issue".to_string()),
                 endpoint: Some("/repos/{owner}/{repo}/issues".to_string()),
                 method: Some(HttpMethod::POST),
+                auth: None,
                 headers: HashMap::new(),
                 params: HashMap::new(),
                 body: None,
@@ -135,6 +140,7 @@ mod tests {
                 description: Some("Issues operations".to_string()),
                 endpoint: Some("/repos/{owner}/{repo}/issues".to_string()),
                 method: Some(HttpMethod::GET),
+                auth: None,
                 headers: HashMap::new(),
                 params: HashMap::new(),
                 body: None,
@@ -149,6 +155,7 @@ mod tests {
                 description: Some("Repository operations".to_string()),
                 endpoint: Some("/repos".to_string()),
                 method: Some(HttpMethod::GET),
+                auth: None,
                 headers: HashMap::new(),
                 params: HashMap::new(),
                 body: None,
@@ -166,6 +173,7 @@ mod tests {
                 name: "GITHUB_TOKEN".to_string(),
                 required: true,
             }],
+            auth: HashMap::new(),
             commands,
         }
     }
@@ -185,6 +193,7 @@ mod tests {
                 description: Some("Get a repository".to_string()),
                 endpoint: Some("/repos/{owner}/{repo}".to_string()),
                 method: Some(HttpMethod::GET),
+                auth: None,
                 headers,
                 params: HashMap::new(),
                 body: None,
@@ -208,6 +217,7 @@ mod tests {
                     required: false,
                 },
             ],
+            auth: HashMap::new(),
             commands,
         }
     }
@@ -239,6 +249,7 @@ mod tests {
                 description: Some("Get a repository".to_string()),
                 endpoint: Some("/repos/{owner}/{repo}".to_string()),
                 method: Some(HttpMethod::GET),
+                auth: None,
                 headers: HashMap::new(),
                 params,
                 body: None,
@@ -262,6 +273,7 @@ mod tests {
             description: "GitHub API".to_string(),
             base_url: "https://api.github.com".to_string(),
             env: vec![],
+            auth: HashMap::new(),
             commands,
         }
     }

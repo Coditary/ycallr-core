@@ -113,6 +113,99 @@ commands:
         required: true
 "#;
 
+const NAMED_AUTH_YAML: &str = r#"
+name: github
+version: "1.0.0"
+description: GitHub API with named auth
+base_url: https://api.github.com
+auth:
+  primary:
+    type: bearer
+    token: ${GITHUB_TOKEN}
+  secondary:
+    type: api_key
+    key: ${API_KEY}
+    name: X-API-Key
+    in: header
+  query_key:
+    type: api_key
+    key: ${API_KEY}
+    name: apikey
+    in: query
+  cookie_key:
+    type: api_key
+    key: ${API_KEY}
+    name: session
+    in: cookie
+  basic:
+    type: http
+    scheme: basic
+    username: ${USER}
+    password: ${PASS}
+  custom_http:
+    type: http
+    scheme: custom
+    prefix: "Token "
+    token: ${TOKEN}
+env:
+  - name: GITHUB_TOKEN
+    required: true
+  - name: API_KEY
+    required: true
+  - name: USER
+    required: true
+  - name: PASS
+    required: true
+  - name: TOKEN
+    required: true
+commands:
+  get-repo:
+    endpoint: /repos/{owner}/{repo}
+    method: GET
+    auth: primary
+    params:
+      owner:
+        description: Repository owner
+        type: string
+        required: true
+      repo:
+        description: Repository name
+        type: string
+        required: true
+  search-repos:
+    endpoint: /search/repositories
+    method: GET
+    auth: secondary
+    params:
+      query:
+        description: Search query
+        type: string
+        required: true
+  query-auth:
+    endpoint: /api/data
+    method: GET
+    auth: query_key
+    params: {}
+  cookie-auth:
+    endpoint: /api/data
+    method: GET
+    auth: cookie_key
+    params: {}
+  basic-auth:
+    endpoint: /api/data
+    method: GET
+    auth: basic
+    params: {}
+  custom-auth:
+    endpoint: /api/data
+    method: GET
+    auth: custom_http
+    params: {}
+  public-endpoint:
+    endpoint: /status
+    method: GET
+"#;
+
 const NESTED_YAML: &str = r#"
 name: github
 version: "1.0.0"
@@ -242,4 +335,134 @@ fn test_path_alias_yaml_parsing() {
     let api = ycallr_core::yaml_parser::parse_yaml(PATH_ALIAS_YAML).unwrap();
     let cmd = api.commands.get("get-item").unwrap();
     assert_eq!(cmd.endpoint.as_deref(), Some("/items/{id}"));
+}
+
+#[test]
+fn test_named_auth_yaml_parsing() {
+    let api = ycallr_core::yaml_parser::parse_yaml(NAMED_AUTH_YAML).unwrap();
+    assert_eq!(api.auth.len(), 6);
+    assert!(api.auth.contains_key("primary"));
+    assert!(api.auth.contains_key("secondary"));
+    assert!(api.auth.contains_key("query_key"));
+    assert!(api.auth.contains_key("cookie_key"));
+    assert!(api.auth.contains_key("basic"));
+    assert!(api.auth.contains_key("custom_http"));
+}
+
+#[test]
+fn test_named_auth_bearer_config() {
+    let api = ycallr_core::yaml_parser::parse_yaml(NAMED_AUTH_YAML).unwrap();
+    let primary = api.auth.get("primary").unwrap();
+    match primary {
+        ycallr_core::AuthConfig::Bearer { token } => {
+            assert_eq!(token, "${GITHUB_TOKEN}");
+        }
+        _ => panic!("Expected Bearer auth"),
+    }
+}
+
+#[test]
+fn test_named_auth_api_key_header() {
+    let api = ycallr_core::yaml_parser::parse_yaml(NAMED_AUTH_YAML).unwrap();
+    let secondary = api.auth.get("secondary").unwrap();
+    match secondary {
+        ycallr_core::AuthConfig::ApiKey { key, name, in_ } => {
+            assert_eq!(key, "${API_KEY}");
+            assert_eq!(name, "X-API-Key");
+            assert_eq!(in_, &ycallr_core::models::ApiKeyLocation::Header);
+        }
+        _ => panic!("Expected ApiKey auth"),
+    }
+}
+
+#[test]
+fn test_named_auth_api_key_query() {
+    let api = ycallr_core::yaml_parser::parse_yaml(NAMED_AUTH_YAML).unwrap();
+    let query_key = api.auth.get("query_key").unwrap();
+    match query_key {
+        ycallr_core::AuthConfig::ApiKey { key, name, in_ } => {
+            assert_eq!(key, "${API_KEY}");
+            assert_eq!(name, "apikey");
+            assert_eq!(in_, &ycallr_core::models::ApiKeyLocation::Query);
+        }
+        _ => panic!("Expected ApiKey auth"),
+    }
+}
+
+#[test]
+fn test_named_auth_api_key_cookie() {
+    let api = ycallr_core::yaml_parser::parse_yaml(NAMED_AUTH_YAML).unwrap();
+    let cookie_key = api.auth.get("cookie_key").unwrap();
+    match cookie_key {
+        ycallr_core::AuthConfig::ApiKey { key, name, in_ } => {
+            assert_eq!(key, "${API_KEY}");
+            assert_eq!(name, "session");
+            assert_eq!(in_, &ycallr_core::models::ApiKeyLocation::Cookie);
+        }
+        _ => panic!("Expected ApiKey auth"),
+    }
+}
+
+#[test]
+fn test_named_auth_http_basic() {
+    let api = ycallr_core::yaml_parser::parse_yaml(NAMED_AUTH_YAML).unwrap();
+    let basic = api.auth.get("basic").unwrap();
+    match basic {
+        ycallr_core::AuthConfig::Http {
+            scheme,
+            username,
+            password,
+            ..
+        } => {
+            assert_eq!(scheme, "basic");
+            assert_eq!(username.as_deref(), Some("${USER}"));
+            assert_eq!(password.as_deref(), Some("${PASS}"));
+        }
+        _ => panic!("Expected Http auth"),
+    }
+}
+
+#[test]
+fn test_named_auth_http_custom() {
+    let api = ycallr_core::yaml_parser::parse_yaml(NAMED_AUTH_YAML).unwrap();
+    let custom = api.auth.get("custom_http").unwrap();
+    match custom {
+        ycallr_core::AuthConfig::Http {
+            scheme,
+            prefix,
+            token,
+            ..
+        } => {
+            assert_eq!(scheme, "custom");
+            assert_eq!(prefix.as_deref(), Some("Token "));
+            assert_eq!(token.as_deref(), Some("${TOKEN}"));
+        }
+        _ => panic!("Expected Http auth"),
+    }
+}
+
+#[test]
+fn test_command_auth_reference() {
+    let api = ycallr_core::yaml_parser::parse_yaml(NAMED_AUTH_YAML).unwrap();
+
+    let get_repo = api.commands.get("get-repo").unwrap();
+    assert_eq!(get_repo.auth.as_deref(), Some("primary"));
+
+    let search = api.commands.get("search-repos").unwrap();
+    assert_eq!(search.auth.as_deref(), Some("secondary"));
+
+    let query = api.commands.get("query-auth").unwrap();
+    assert_eq!(query.auth.as_deref(), Some("query_key"));
+
+    let cookie = api.commands.get("cookie-auth").unwrap();
+    assert_eq!(cookie.auth.as_deref(), Some("cookie_key"));
+
+    let basic = api.commands.get("basic-auth").unwrap();
+    assert_eq!(basic.auth.as_deref(), Some("basic"));
+
+    let custom = api.commands.get("custom-auth").unwrap();
+    assert_eq!(custom.auth.as_deref(), Some("custom_http"));
+
+    let public = api.commands.get("public-endpoint").unwrap();
+    assert!(public.auth.is_none());
 }

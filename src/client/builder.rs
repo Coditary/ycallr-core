@@ -83,10 +83,13 @@ impl YcallrClientBuilder {
             .build()
             .map_err(|e| YcallrError::HttpClient(e.to_string()))?;
 
+        let auth_configs = self.api.auth.clone();
+
         Ok(YcallrClient {
             api: self.api,
             http_client,
             auth: self.auth,
+            auth_configs,
             env_mode: self.env_mode,
             env_vars: resolved_env,
         })

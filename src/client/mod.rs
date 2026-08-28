@@ -16,6 +16,7 @@ pub struct YcallrClient {
     pub(crate) api: ApiDefinition,
     pub(crate) http_client: reqwest::blocking::Client,
     pub(crate) auth: Option<AuthConfig>,
+    pub(crate) auth_configs: HashMap<String, AuthConfig>,
     pub(crate) env_mode: EnvMode,
     pub(crate) env_vars: HashMap<String, String>,
 }
@@ -77,6 +78,10 @@ impl YcallrClient {
     pub fn api(&self) -> &ApiDefinition {
         &self.api
     }
+
+    pub fn get_auth_config(&self, name: &str) -> Option<&AuthConfig> {
+        self.auth_configs.get(name)
+    }
 }
 
 #[cfg(test)]
@@ -84,6 +89,7 @@ mod tests {
     use super::*;
     use crate::models::{Command, ParamType, Parameter, ResponseConfig, ResponseEntry};
     use crate::client::{AuthConfig, EnvMode};
+    use crate::models::ApiKeyLocation;
     use crate::HttpMethod;
 
     fn create_test_api() -> ApiDefinition {
@@ -117,6 +123,7 @@ mod tests {
                 description: Some("Get a repository".to_string()),
                 endpoint: Some("/repos/{owner}/{repo}".to_string()),
                 method: Some(HttpMethod::GET),
+                auth: None,
                 headers,
                 params,
                 body: None,
@@ -144,6 +151,7 @@ mod tests {
                 description: Some("Create an issue".to_string()),
                 endpoint: Some("/repos/{owner}/{repo}/issues".to_string()),
                 method: Some(HttpMethod::POST),
+                auth: None,
                 headers: create_headers,
                 params: create_params,
                 body: None,
@@ -158,6 +166,7 @@ mod tests {
             description: "GitHub API".to_string(),
             base_url: "https://api.github.com".to_string(),
             env: vec![],
+            auth: HashMap::new(),
             commands,
         }
     }
@@ -198,6 +207,7 @@ mod tests {
                 description: Some("Get a repository".to_string()),
                 endpoint: Some("/repos/{owner}/{repo}".to_string()),
                 method: Some(HttpMethod::GET),
+                auth: None,
                 headers: HashMap::new(),
                 params,
                 body: None,
@@ -221,6 +231,7 @@ mod tests {
             description: "GitHub API".to_string(),
             base_url: "https://api.github.com".to_string(),
             env: vec![],
+            auth: HashMap::new(),
             commands,
         }
     }
@@ -237,6 +248,7 @@ mod tests {
                 description: Some("Create an issue".to_string()),
                 endpoint: Some("/repos/{owner}/{repo}/issues".to_string()),
                 method: Some(HttpMethod::POST),
+                auth: None,
                 headers: HashMap::new(),
                 params: HashMap::new(),
                 body: None,
@@ -250,6 +262,7 @@ mod tests {
                 description: Some("List issues".to_string()),
                 endpoint: Some("/repos/{owner}/{repo}/issues".to_string()),
                 method: Some(HttpMethod::GET),
+                auth: None,
                 headers: HashMap::new(),
                 params: HashMap::new(),
                 body: None,
@@ -264,6 +277,7 @@ mod tests {
                 description: Some("Issues operations".to_string()),
                 endpoint: Some("/repos/{owner}/{repo}/issues".to_string()),
                 method: Some(HttpMethod::GET),
+                auth: None,
                 headers: HashMap::new(),
                 params: HashMap::new(),
                 body: None,
@@ -278,6 +292,7 @@ mod tests {
                 description: Some("Repository operations".to_string()),
                 endpoint: Some("/repos".to_string()),
                 method: Some(HttpMethod::GET),
+                auth: None,
                 headers: HashMap::new(),
                 params: HashMap::new(),
                 body: None,
@@ -292,6 +307,7 @@ mod tests {
             description: "GitHub API".to_string(),
             base_url: "https://api.github.com".to_string(),
             env: vec![],
+            auth: HashMap::new(),
             commands,
         }
     }
@@ -311,6 +327,7 @@ mod tests {
                 description: Some("Get a repository".to_string()),
                 endpoint: Some("/repos/{owner}/{repo}".to_string()),
                 method: Some(HttpMethod::GET),
+                auth: None,
                 headers,
                 params: HashMap::new(),
                 body: None,
@@ -328,6 +345,7 @@ mod tests {
                 name: "GITHUB_TOKEN".to_string(),
                 required: true,
             }],
+            auth: HashMap::new(),
             commands,
         }
     }
@@ -342,7 +360,7 @@ mod tests {
     #[test]
     fn test_client_with_auth() {
         let api = create_test_api();
-        let client = YcallrClient::with_auth(api, AuthConfig::Bearer("test-token".to_string()));
+        let client = YcallrClient::with_auth(api, AuthConfig::bearer("test-token".to_string()));
         assert!(client.is_ok());
         let client = client.unwrap();
         assert!(client.auth.is_some());
@@ -359,21 +377,22 @@ mod tests {
 
     #[test]
     fn test_auth_types() {
-        let bearer = AuthConfig::Bearer("token".to_string());
-        let api_key = AuthConfig::ApiKey {
-            key: "key123".to_string(),
-            header: "X-API-Key".to_string(),
-        };
+        let bearer = AuthConfig::bearer("token".to_string());
+        let api_key = AuthConfig::api_key(
+            "key123".to_string(),
+            "X-API-Key".to_string(),
+        );
 
         match bearer {
-            AuthConfig::Bearer(t) => assert_eq!(t, "token"),
+            AuthConfig::Bearer { token } => assert_eq!(token, "token"),
             _ => panic!("Expected Bearer"),
         }
 
         match api_key {
-            AuthConfig::ApiKey { key, header } => {
+            AuthConfig::ApiKey { key, name, in_ } => {
                 assert_eq!(key, "key123");
-                assert_eq!(header, "X-API-Key");
+                assert_eq!(name, "X-API-Key");
+                assert_eq!(in_, ApiKeyLocation::Header);
             }
             _ => panic!("Expected ApiKey"),
         }
@@ -512,7 +531,7 @@ mod tests {
     fn test_builder_pattern() {
         let api = create_test_api();
         let client = YcallrClient::builder(api)
-            .auth(AuthConfig::Bearer("token".to_string()))
+            .auth(AuthConfig::bearer("token".to_string()))
             .env_mode(EnvMode::Manual)
             .env("KEY", "value")
             .build()
@@ -594,6 +613,7 @@ mod client_integration_tests {
                 description: Some("Get a repository".to_string()),
                 endpoint: Some("/repos/{owner}/{repo}".to_string()),
                 method: Some(HttpMethod::GET),
+                auth: None,
                 headers: HashMap::new(),
                 params,
                 body: None,
@@ -617,6 +637,7 @@ mod client_integration_tests {
             description: "GitHub API".to_string(),
             base_url: base_url.to_string(),
             env: vec![],
+            auth: HashMap::new(),
             commands,
         }
     }
