@@ -26,6 +26,9 @@ prost-build = "0.12"
 [dev-dependencies]
 wasm-bindgen-test = "0.3"
 
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+dirs = "5"
+
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 tempfile = "3.10"
 assert_cmd = "2.0"
@@ -39,8 +42,10 @@ protobuf = []
 call-engine = []
 client = ["call-engine", "dep:reqwest"]
 test-utils = ["client"]
-ffi = ["client", "yaml"]
+ffi = ["client", "yaml", "protobuf"]
 wasm = [
+    "yaml",
+    "protobuf",
     "call-engine",
     "dep:wasm-bindgen",
     "dep:wasm-bindgen-futures",

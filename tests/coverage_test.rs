@@ -55,7 +55,11 @@ fn test_multipart_body_over_http() {
     let dir = tempdir().unwrap();
     let file_path = dir.path().join("payload.bin");
     std::fs::write(&file_path, b"file-bytes").unwrap();
-    let canonical = file_path.canonicalize().unwrap().to_string_lossy().to_string();
+    let canonical = file_path
+        .canonicalize()
+        .unwrap()
+        .to_string_lossy()
+        .to_string();
 
     let mut commands = HashMap::new();
     commands.insert(

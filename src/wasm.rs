@@ -13,13 +13,43 @@ pub struct YcallrApi {
     inner: ApiDefinition,
 }
 
+/// Compile YAML to protobuf bytes (install step). Use [`YcallrApi::from_proto`] at runtime.
+#[wasm_bindgen(js_name = compileYaml)]
+pub fn compile_yaml_profile(yaml: &str) -> std::result::Result<Vec<u8>, JsValue> {
+    crate::profile_store::compile_yaml_str(yaml).map_err(|e| JsValue::from_str(&e.to_string()))
+}
+
 #[wasm_bindgen]
 impl YcallrApi {
-    #[wasm_bindgen(constructor)]
-    pub fn new(yaml: &str) -> std::result::Result<YcallrApi, JsValue> {
-        let api =
-            crate::yaml_parser::parse_yaml(yaml).map_err(|e| JsValue::from_str(&e.to_string()))?;
+    /// Load an API from compiled protobuf bytes (primary runtime constructor).
+    #[wasm_bindgen(js_name = fromProto)]
+    pub fn from_proto(bytes: &[u8]) -> std::result::Result<YcallrApi, JsValue> {
+        let api = crate::profile_store::load_from_proto_bytes(bytes)
+            .map_err(|e| JsValue::from_str(&e.to_string()))?;
         Ok(YcallrApi { inner: api })
+    }
+
+    /// Compile and load from YAML (convenience; prefer `compileYaml` + `fromProto` in production).
+    #[wasm_bindgen(js_name = fromYaml)]
+    pub fn from_yaml(yaml: &str) -> std::result::Result<YcallrApi, JsValue> {
+        let bytes = compile_yaml_profile(yaml)?;
+        YcallrApi::from_proto(&bytes)
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[wasm_bindgen(js_name = installProfile)]
+    pub fn install_profile(name: &str) -> std::result::Result<(), JsValue> {
+        crate::profile_store::install_profile(name)
+            .map(|_| ())
+            .map_err(|e| JsValue::from_str(&e.to_string()))
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[wasm_bindgen(js_name = loadInstalled)]
+    pub fn load_installed(name: &str) -> std::result::Result<YcallrApi, JsValue> {
+        crate::profile_store::load_installed_profile(name)
+            .map(|inner| YcallrApi { inner })
+            .map_err(|e| JsValue::from_str(&e.to_string()))
     }
 
     #[wasm_bindgen(getter)]
@@ -600,27 +630,32 @@ commands:
         issue_title: "{title}"
 "#;
 
+    fn api_from_yaml(yaml: &str) -> YcallrApi {
+        let bytes = compile_yaml_profile(yaml).unwrap();
+        YcallrApi::from_proto(&bytes).unwrap()
+    }
+
     #[wasm_bindgen_test]
-    fn test_wasm_new() {
-        let api = YcallrApi::new(VALID_YAML).unwrap();
+    fn test_wasm_from_proto() {
+        let api = api_from_yaml(VALID_YAML);
         assert_eq!(api.name(), "test-api");
     }
 
     #[wasm_bindgen_test]
-    fn test_wasm_invalid_yaml() {
-        let result = YcallrApi::new("not valid yaml {{{");
+    fn test_wasm_compile_invalid_yaml() {
+        let result = compile_yaml_profile("not valid yaml {{{");
         assert!(result.is_err());
     }
 
     #[wasm_bindgen_test]
-    fn test_wasm_empty_yaml() {
-        let result = YcallrApi::new("");
+    fn test_wasm_compile_empty_yaml() {
+        let result = compile_yaml_profile("");
         assert!(result.is_err());
     }
 
     #[wasm_bindgen_test]
     fn test_wasm_getters() {
-        let api = YcallrApi::new(VALID_YAML).unwrap();
+        let api = api_from_yaml(VALID_YAML);
         assert_eq!(api.name(), "test-api");
         assert_eq!(api.version(), "1.0.0");
         assert_eq!(api.base_url(), "https://api.test.com");
@@ -631,7 +666,7 @@ commands:
 
     #[wasm_bindgen_test]
     fn test_wasm_list_commands_and_subcommands() {
-        let api = YcallrApi::new(NESTED_YAML).unwrap();
+        let api = api_from_yaml(NESTED_YAML);
         let top = api.list_commands();
         assert!(top.contains("repos"));
         let issues = api.list_subcommands("repos").unwrap();
@@ -642,7 +677,7 @@ commands:
 
     #[wasm_bindgen_test]
     fn test_wasm_to_json() {
-        let api = YcallrApi::new(VALID_YAML).unwrap();
+        let api = api_from_yaml(VALID_YAML);
         let json = api.to_json().unwrap();
         assert!(json.contains("test-api"));
         assert!(json.contains("https://api.test.com"));
@@ -650,14 +685,14 @@ commands:
 
     #[wasm_bindgen_test]
     fn test_wasm_to_proto() {
-        let api = YcallrApi::new(VALID_YAML).unwrap();
+        let api = api_from_yaml(VALID_YAML);
         let proto = api.to_proto().unwrap();
         assert!(!proto.is_empty());
     }
 
     #[wasm_bindgen_test]
     fn test_wasm_command_exists() {
-        let api = YcallrApi::new(VALID_YAML).unwrap();
+        let api = api_from_yaml(VALID_YAML);
         assert!(api.command_exists("get-item"));
         assert!(api.command_exists("create-item"));
         assert!(!api.command_exists("nonexistent"));
@@ -665,7 +700,7 @@ commands:
 
     #[wasm_bindgen_test]
     fn test_wasm_nested_command_exists() {
-        let api = YcallrApi::new(NESTED_YAML).unwrap();
+        let api = api_from_yaml(NESTED_YAML);
         assert!(api.command_exists("repos"));
         assert!(api.command_exists("repos.issues"));
         assert!(api.command_exists("repos.issues.create"));
@@ -676,7 +711,7 @@ commands:
 
     #[wasm_bindgen_test]
     fn test_wasm_nested_yaml_to_proto_roundtrip() {
-        let api = YcallrApi::new(NESTED_YAML).unwrap();
+        let api = api_from_yaml(NESTED_YAML);
         let proto = api.to_proto().unwrap();
         assert!(!proto.is_empty());
         let json = api.to_json().unwrap();
@@ -687,13 +722,13 @@ commands:
 
     #[wasm_bindgen_test]
     fn test_wasm_env_count() {
-        let api = YcallrApi::new(ENV_YAML).unwrap();
+        let api = api_from_yaml(ENV_YAML);
         assert_eq!(api.env_count(), 2);
     }
 
     #[wasm_bindgen_test]
     fn test_wasm_env_name() {
-        let api = YcallrApi::new(ENV_YAML).unwrap();
+        let api = api_from_yaml(ENV_YAML);
         assert_eq!(api.env_name(0), Some("GITHUB_TOKEN".to_string()));
         assert_eq!(api.env_name(1), Some("GITHUB_URL".to_string()));
         assert_eq!(api.env_name(99), None);
@@ -701,7 +736,7 @@ commands:
 
     #[wasm_bindgen_test]
     fn test_wasm_env_required() {
-        let api = YcallrApi::new(ENV_YAML).unwrap();
+        let api = api_from_yaml(ENV_YAML);
         assert_eq!(api.env_required(0), Some(true));
         assert_eq!(api.env_required(1), Some(false));
         assert_eq!(api.env_required(99), None);
@@ -709,21 +744,21 @@ commands:
 
     #[wasm_bindgen_test]
     fn test_wasm_env_yaml_contains_substitution() {
-        let api = YcallrApi::new(ENV_YAML).unwrap();
+        let api = api_from_yaml(ENV_YAML);
         let json = api.to_json().unwrap();
         assert!(json.contains("${GITHUB_TOKEN}"));
     }
 
     #[wasm_bindgen_test]
     fn test_wasm_command_has_responses() {
-        let api = YcallrApi::new(RESPONSE_YAML).unwrap();
+        let api = api_from_yaml(RESPONSE_YAML);
         assert!(api.command_has_responses("create-item"));
         assert!(!api.command_has_responses("nonexistent"));
     }
 
     #[wasm_bindgen_test]
     fn test_wasm_command_success_message() {
-        let api = YcallrApi::new(RESPONSE_YAML).unwrap();
+        let api = api_from_yaml(RESPONSE_YAML);
         assert_eq!(
             api.command_success_message("create-item"),
             Some("Created {output.name}".to_string())
@@ -732,7 +767,7 @@ commands:
 
     #[wasm_bindgen_test]
     fn test_wasm_command_failure_message() {
-        let api = YcallrApi::new(RESPONSE_YAML).unwrap();
+        let api = api_from_yaml(RESPONSE_YAML);
         assert_eq!(
             api.command_failure_message("create-item"),
             Some("Failed to create item".to_string())
@@ -741,7 +776,7 @@ commands:
 
     #[wasm_bindgen_test]
     fn test_wasm_response_yaml_in_json() {
-        let api = YcallrApi::new(RESPONSE_YAML).unwrap();
+        let api = api_from_yaml(RESPONSE_YAML);
         let json = api.to_json().unwrap();
         assert!(json.contains("Created {output.name}"));
         assert!(json.contains("Failed to create item"));
@@ -749,14 +784,14 @@ commands:
 
     #[wasm_bindgen_test]
     fn test_wasm_command_has_body() {
-        let api = YcallrApi::new(BODY_YAML).unwrap();
+        let api = api_from_yaml(BODY_YAML);
         assert!(api.command_has_body("create-issue"));
         assert!(!api.command_has_body("nonexistent"));
     }
 
     #[wasm_bindgen_test]
     fn test_wasm_command_body_json() {
-        let api = YcallrApi::new(BODY_YAML).unwrap();
+        let api = api_from_yaml(BODY_YAML);
         let body = api.command_body_json("create-issue").unwrap();
         assert!(body.contains("owner_id"));
         assert!(body.contains("{owner}"));
@@ -766,7 +801,7 @@ commands:
 
     #[wasm_bindgen_test]
     fn test_wasm_body_yaml_in_json() {
-        let api = YcallrApi::new(BODY_YAML).unwrap();
+        let api = api_from_yaml(BODY_YAML);
         let json = api.to_json().unwrap();
         assert!(json.contains("owner_id"));
         assert!(json.contains("{owner}"));

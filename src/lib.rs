@@ -4,6 +4,9 @@ pub mod models;
 #[cfg(feature = "call-engine")]
 pub mod call_engine;
 
+#[cfg(all(feature = "yaml", feature = "protobuf"))]
+pub mod profile_store;
+
 #[cfg(feature = "yaml")]
 pub mod yaml_parser;
 

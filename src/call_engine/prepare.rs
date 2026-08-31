@@ -543,7 +543,11 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let file_path = dir.path().join("part.bin");
         std::fs::write(&file_path, b"data").unwrap();
-        let canonical = file_path.canonicalize().unwrap().to_string_lossy().to_string();
+        let canonical = file_path
+            .canonicalize()
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
 
         let mut commands = HashMap::new();
         commands.insert(

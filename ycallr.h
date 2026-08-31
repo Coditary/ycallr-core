@@ -25,6 +25,26 @@ void ycallr_error_free(char *err);
 
 struct YcallrApi *ycallr_parse_yaml(const char *yaml);
 
+/**
+ * Load a compiled profile from `~/.config/ycallr/apis/<name>.pb`.
+ */
+struct YcallrApi *ycallr_load_installed(const char *name);
+
+/**
+ * Decode a compiled protobuf profile from memory (e.g. embedded or custom storage).
+ */
+struct YcallrApi *ycallr_parse_proto(const uint8_t *data, uintptr_t len);
+
+/**
+ * Compile `~/.config/ycallr/apis/<name>.yaml` to `<name>.pb`. Returns 0 on success.
+ */
+int32_t ycallr_install(const char *name);
+
+/**
+ * Install from a YAML file path (copies into apis dir when needed). Returns 0 on success.
+ */
+int32_t ycallr_install_yaml_file(const char *path);
+
 void ycallr_free_api(struct YcallrApi *api);
 
 /**
@@ -46,6 +66,40 @@ const char *ycallr_get_description(const struct YcallrApi *api);
  */
 char *ycallr_list_commands(const struct YcallrApi *api);
 
+/**
+ * Returns JSON array of installed profile names: `["github","demo"]`.
+ */
+char *ycallr_list_installed(void);
+
+/**
+ * After `ycallr_install` / `ycallr_install_yaml_file`: `{"name":"...","pb_path":"..."}`.
+ */
+char *ycallr_get_last_install_result(void);
+
+/**
+ * Returns filesystem path to `~/.config/ycallr/apis/<name>.pb`.
+ */
+char *ycallr_compiled_profile_path(const char *name);
+
+/**
+ * Returns JSON array of subcommand names for `path` (use empty string for top level).
+ */
+char *ycallr_list_subcommands(const struct YcallrApi *api, const char *path);
+
+/**
+ * Returns JSON array of missing required parameter names before a call.
+ */
+char *ycallr_missing_params_json(const struct YcallrApi *api,
+                                 const char *command_path,
+                                 const char *params_json);
+
+/**
+ * Builds implicit JSON body for POST/PUT/PATCH when YAML has no body; NULL if none.
+ */
+char *ycallr_build_implicit_body_json(const struct YcallrApi *api,
+                                      const char *command_path,
+                                      const char *params_json);
+
 struct YcallrCommand *ycallr_get_command(const struct YcallrApi *api, const char *path);
 
 void ycallr_free_command(struct YcallrCommand *cmd);
@@ -65,6 +119,13 @@ char *ycallr_command_get_params_json(const struct YcallrCommand *cmd);
 bool ycallr_command_is_leaf(const struct YcallrCommand *cmd);
 
 bool ycallr_command_is_branch(const struct YcallrCommand *cmd);
+
+bool ycallr_command_has_body(const struct YcallrCommand *cmd);
+
+/**
+ * Returns JSON array of path parameter names from the endpoint template.
+ */
+char *ycallr_command_get_path_params_json(const struct YcallrCommand *cmd);
 
 /**
  * Create a client. env_mode: 0=Auto, 1=Manual. envs_json: `{"KEY":"val"}` or NULL.

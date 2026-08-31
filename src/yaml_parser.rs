@@ -10,11 +10,28 @@ pub fn parse_yaml(yaml_content: &str) -> Result<ApiDefinition> {
     Ok(api)
 }
 
+/// Parse YAML for client/install use (allows loopback and private hosts).
+pub fn parse_yaml_for_client(yaml_content: &str) -> Result<ApiDefinition> {
+    let api: ApiDefinition =
+        serde_yaml::from_str(yaml_content).map_err(|e| YcallrError::YamlParse(e.to_string()))?;
+
+    api.validate_for_client()?;
+
+    Ok(api)
+}
+
 pub fn parse_yaml_file(path: &std::path::Path) -> Result<ApiDefinition> {
     let content = std::fs::read_to_string(path)
         .map_err(|e| YcallrError::YamlParse(format!("Failed to read file: {}", e)))?;
 
     parse_yaml(&content)
+}
+
+pub fn parse_yaml_file_for_client(path: &std::path::Path) -> Result<ApiDefinition> {
+    let content = std::fs::read_to_string(path)
+        .map_err(|e| YcallrError::YamlParse(format!("Failed to read file: {}", e)))?;
+
+    parse_yaml_for_client(&content)
 }
 
 #[cfg(test)]

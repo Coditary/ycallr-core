@@ -39,6 +39,18 @@ impl Compiler {
     }
 
     pub fn proto_to_yaml(data: &[u8]) -> Result<ApiDefinition> {
+        let api = Self::decode_proto_api(data)?;
+        api.validate()?;
+        Ok(api)
+    }
+
+    pub fn proto_to_yaml_for_client(data: &[u8]) -> Result<ApiDefinition> {
+        let api = Self::decode_proto_api(data)?;
+        api.validate_for_client()?;
+        Ok(api)
+    }
+
+    fn decode_proto_api(data: &[u8]) -> Result<ApiDefinition> {
         let proto_api =
             proto::ApiDefinition::decode(data).map_err(|e| YcallrError::Protobuf(e.to_string()))?;
 
@@ -54,7 +66,7 @@ impl Compiler {
             auth.insert(k, auth_from_proto(&v)?);
         }
 
-        let api = ApiDefinition {
+        Ok(ApiDefinition {
             name: proto_api.name,
             version: proto_api.version,
             description: proto_api.description,
@@ -62,9 +74,7 @@ impl Compiler {
             env,
             auth,
             commands,
-        };
-        api.validate()?;
-        Ok(api)
+        })
     }
 }
 
@@ -75,6 +85,10 @@ impl ApiDefinition {
 
     pub fn from_proto_bytes(data: &[u8]) -> Result<Self> {
         Compiler::proto_to_yaml(data)
+    }
+
+    pub fn from_proto_bytes_for_client(data: &[u8]) -> Result<Self> {
+        Compiler::proto_to_yaml_for_client(data)
     }
 }
 
@@ -507,16 +521,25 @@ mod tests {
     #[test]
     fn test_conversion_enum_errors_and_all_methods() {
         use super::conversions::{
-            api_key_location_from_i32, api_key_location_to_proto, auth_from_proto,
-            auth_to_proto, method_from_i32, method_to_proto, type_from_i32, type_to_proto,
+            api_key_location_from_i32, api_key_location_to_proto, auth_from_proto, auth_to_proto,
+            method_from_i32, method_to_proto, type_from_i32, type_to_proto,
         };
         use crate::models::{ApiKeyLocation, HttpMethod, ParamType};
         use crate::proto;
 
         assert_eq!(method_to_proto(&HttpMethod::PUT), proto::HttpMethod::Put);
-        assert_eq!(method_to_proto(&HttpMethod::DELETE), proto::HttpMethod::Delete);
-        assert_eq!(method_to_proto(&HttpMethod::PATCH), proto::HttpMethod::Patch);
-        assert_eq!(type_to_proto(&ParamType::Boolean), proto::ParamType::Boolean);
+        assert_eq!(
+            method_to_proto(&HttpMethod::DELETE),
+            proto::HttpMethod::Delete
+        );
+        assert_eq!(
+            method_to_proto(&HttpMethod::PATCH),
+            proto::HttpMethod::Patch
+        );
+        assert_eq!(
+            type_to_proto(&ParamType::Boolean),
+            proto::ParamType::Boolean
+        );
         assert_eq!(type_to_proto(&ParamType::Array), proto::ParamType::Array);
         assert!(method_from_i32(99).is_err());
         assert!(type_from_i32(99).is_err());
@@ -532,5 +555,14 @@ mod tests {
 
         let missing = proto::AuthConfig { kind: None };
         assert!(auth_from_proto(&missing).is_err());
+    }
+
+    #[test]
+    fn test_from_proto_bytes_for_client_allows_loopback() {
+        let mut api = create_test_api();
+        api.base_url = "http://127.0.0.1:8080".to_string();
+        let bytes = Compiler::yaml_to_proto(&api).unwrap();
+        let restored = ApiDefinition::from_proto_bytes_for_client(&bytes).unwrap();
+        assert_eq!(restored.base_url, "http://127.0.0.1:8080");
     }
 }

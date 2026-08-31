@@ -162,11 +162,7 @@ mod tests {
         assert!(matches!(bearer, AuthConfig::Bearer { .. }));
         let key = AuthConfig::api_key("k".to_string(), "H".to_string());
         assert!(matches!(key, AuthConfig::ApiKey { .. }));
-        let key_q = AuthConfig::api_key_in(
-            "k".to_string(),
-            "Q".to_string(),
-            ApiKeyLocation::Query,
-        );
+        let key_q = AuthConfig::api_key_in("k".to_string(), "Q".to_string(), ApiKeyLocation::Query);
         assert!(matches!(key_q, AuthConfig::ApiKey { .. }));
         let basic = AuthConfig::http_basic("u".to_string(), "p".to_string());
         assert!(matches!(basic, AuthConfig::Http { .. }));

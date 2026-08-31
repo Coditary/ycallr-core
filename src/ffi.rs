@@ -12,6 +12,7 @@ use crate::models::{ApiDefinition, AuthConfig};
 
 thread_local! {
     static LAST_ERROR: RefCell<Option<CString>> = const { RefCell::new(None) };
+    static LAST_INSTALL_RESULT: RefCell<Option<String>> = const { RefCell::new(None) };
 }
 
 fn set_last_error(msg: String) {
@@ -19,6 +20,87 @@ fn set_last_error(msg: String) {
     LAST_ERROR.with(|e| {
         *e.borrow_mut() = CString::new(sanitized).ok();
     });
+}
+
+fn set_last_install_result(name: &str, pb_path: &std::path::Path) {
+    let json = serde_json::json!({
+        "name": name,
+        "pb_path": pb_path.to_string_lossy(),
+    });
+    LAST_INSTALL_RESULT.with(|r| {
+        *r.borrow_mut() = serde_json::to_string(&json).ok();
+    });
+}
+
+fn compute_missing_params_json(
+    api: &ApiDefinition,
+    command_path: &str,
+    params: &HashMap<String, String>,
+) -> Result<String, String> {
+    let cmd = api.get_command(command_path).map_err(|e| e.to_string())?;
+    let missing = missing_required_params(cmd, params);
+    serde_json::to_string(&missing).map_err(|e| e.to_string())
+}
+
+fn compute_implicit_body_json(
+    api: &ApiDefinition,
+    command_path: &str,
+    params: &HashMap<String, String>,
+) -> Option<String> {
+    let cmd = api.get_command(command_path).ok()?;
+    build_implicit_body(cmd, params).map(|v| v.to_string())
+}
+
+fn missing_required_params(
+    cmd: &crate::models::Command,
+    params: &HashMap<String, String>,
+) -> Vec<String> {
+    let mut missing = Vec::new();
+
+    for (name, param) in &cmd.params {
+        if param.required && !params.contains_key(name) {
+            missing.push(name.clone());
+        }
+    }
+
+    for path_param in cmd.endpoint_path_param_names() {
+        if !cmd.params.contains_key(&path_param) && !params.contains_key(&path_param) {
+            if !missing.contains(&path_param) {
+                missing.push(path_param);
+            }
+        }
+    }
+
+    missing
+}
+
+fn build_implicit_body(
+    cmd: &crate::models::Command,
+    params: &HashMap<String, String>,
+) -> Option<serde_json::Value> {
+    if cmd.body.is_some() {
+        return None;
+    }
+
+    match cmd.method.as_ref() {
+        Some(crate::models::HttpMethod::POST)
+        | Some(crate::models::HttpMethod::PUT)
+        | Some(crate::models::HttpMethod::PATCH) => {
+            let path_params = cmd.endpoint_path_param_names();
+            let body: serde_json::Map<String, serde_json::Value> = params
+                .iter()
+                .filter(|(key, _)| !path_params.contains(key))
+                .map(|(k, v)| (k.clone(), serde_json::Value::String(v.clone())))
+                .collect();
+
+            if body.is_empty() {
+                None
+            } else {
+                Some(serde_json::Value::Object(body))
+            }
+        }
+        _ => None,
+    }
 }
 
 #[no_mangle]
@@ -101,6 +183,16 @@ fn into_raw_cstring(s: String) -> *mut c_char {
             std::ptr::null_mut()
         }
     }
+}
+
+fn wrap_api(api: ApiDefinition) -> *mut YcallrApi {
+    Box::into_raw(Box::new(YcallrApi {
+        name: into_raw_cstring(api.name.clone()),
+        version: into_raw_cstring(api.version.clone()),
+        description: into_raw_cstring(api.description.clone()),
+        base_url: into_raw_cstring(api.base_url.clone()),
+        _inner: Box::new(api),
+    }))
 }
 
 fn parse_runtime_auth(
@@ -199,26 +291,105 @@ pub extern "C" fn ycallr_parse_yaml(yaml: *const c_char) -> *mut YcallrApi {
         }
     };
 
-    let api = match crate::yaml_parser::parse_yaml(yaml_str) {
-        Ok(a) => a,
+    let api = match crate::profile_store::compile_yaml_str(yaml_str) {
+        Ok(bytes) => match crate::profile_store::load_from_proto_bytes(&bytes) {
+            Ok(api) => api,
+            Err(e) => {
+                set_last_error(e.to_string());
+                return std::ptr::null_mut();
+            }
+        },
         Err(e) => {
             set_last_error(e.to_string());
             return std::ptr::null_mut();
         }
     };
 
-    if let Err(e) = api.validate() {
-        set_last_error(e.to_string());
+    wrap_api(api)
+}
+
+/// Load a compiled profile from `~/.config/ycallr/apis/<name>.pb`.
+#[no_mangle]
+pub extern "C" fn ycallr_load_installed(name: *const c_char) -> *mut YcallrApi {
+    let name = match unsafe { cstr_to_str(name) } {
+        Some(s) => s,
+        None => {
+            set_last_error("Invalid UTF-8 in profile name".into());
+            return std::ptr::null_mut();
+        }
+    };
+
+    match crate::profile_store::load_installed_profile(name) {
+        Ok(api) => wrap_api(api),
+        Err(e) => {
+            set_last_error(e.to_string());
+            std::ptr::null_mut()
+        }
+    }
+}
+
+/// Decode a compiled protobuf profile from memory (e.g. embedded or custom storage).
+#[no_mangle]
+pub extern "C" fn ycallr_parse_proto(data: *const u8, len: usize) -> *mut YcallrApi {
+    if data.is_null() || len == 0 {
+        set_last_error("proto data pointer is null or empty".into());
         return std::ptr::null_mut();
     }
 
-    Box::into_raw(Box::new(YcallrApi {
-        name: into_raw_cstring(api.name.clone()),
-        version: into_raw_cstring(api.version.clone()),
-        description: into_raw_cstring(api.description.clone()),
-        base_url: into_raw_cstring(api.base_url.clone()),
-        _inner: Box::new(api),
-    }))
+    let bytes = unsafe { std::slice::from_raw_parts(data, len) };
+    match crate::profile_store::load_from_proto_bytes(bytes) {
+        Ok(api) => wrap_api(api),
+        Err(e) => {
+            set_last_error(e.to_string());
+            std::ptr::null_mut()
+        }
+    }
+}
+
+/// Compile `~/.config/ycallr/apis/<name>.yaml` to `<name>.pb`. Returns 0 on success.
+#[no_mangle]
+pub extern "C" fn ycallr_install(name: *const c_char) -> i32 {
+    let name = match unsafe { cstr_to_str(name) } {
+        Some(s) => s,
+        None => {
+            set_last_error("Invalid UTF-8 in profile name".into());
+            return -1;
+        }
+    };
+
+    match crate::profile_store::install_profile(name) {
+        Ok(pb_path) => {
+            set_last_install_result(name, &pb_path);
+            0
+        }
+        Err(e) => {
+            set_last_error(e.to_string());
+            -1
+        }
+    }
+}
+
+/// Install from a YAML file path (copies into apis dir when needed). Returns 0 on success.
+#[no_mangle]
+pub extern "C" fn ycallr_install_yaml_file(path: *const c_char) -> i32 {
+    let path_str = match unsafe { cstr_to_str(path) } {
+        Some(s) => s,
+        None => {
+            set_last_error("Invalid UTF-8 in file path".into());
+            return -1;
+        }
+    };
+
+    match crate::profile_store::install_profile_from_path(std::path::Path::new(path_str)) {
+        Ok((name, pb_path)) => {
+            set_last_install_result(&name, &pb_path);
+            0
+        }
+        Err(e) => {
+            set_last_error(e.to_string());
+            -1
+        }
+    }
 }
 
 #[no_mangle]
@@ -316,6 +487,166 @@ pub extern "C" fn ycallr_list_commands(api: *const YcallrApi) -> *mut c_char {
     }
 }
 
+/// Returns JSON array of installed profile names: `["github","demo"]`.
+#[no_mangle]
+pub extern "C" fn ycallr_list_installed() -> *mut c_char {
+    match crate::profile_store::list_installed_profile_names() {
+        Ok(names) => match serde_json::to_string(&names) {
+            Ok(json) => into_raw_cstring(json),
+            Err(e) => {
+                set_last_error(format!("Failed to serialize installed list: {}", e));
+                std::ptr::null_mut()
+            }
+        },
+        Err(e) => {
+            set_last_error(e.to_string());
+            std::ptr::null_mut()
+        }
+    }
+}
+
+/// After `ycallr_install` / `ycallr_install_yaml_file`: `{"name":"...","pb_path":"..."}`.
+#[no_mangle]
+pub extern "C" fn ycallr_get_last_install_result() -> *mut c_char {
+    LAST_INSTALL_RESULT.with(|r| match r.borrow().as_ref() {
+        Some(json) => into_raw_cstring(json.clone()),
+        None => std::ptr::null_mut(),
+    })
+}
+
+/// Returns filesystem path to `~/.config/ycallr/apis/<name>.pb`.
+#[no_mangle]
+pub extern "C" fn ycallr_compiled_profile_path(name: *const c_char) -> *mut c_char {
+    let name = match unsafe { cstr_to_str(name) } {
+        Some(s) => s,
+        None => {
+            set_last_error("Invalid UTF-8 in profile name".into());
+            return std::ptr::null_mut();
+        }
+    };
+    let path = crate::profile_store::compiled_profile_path(name);
+    into_raw_cstring(path.to_string_lossy().into_owned())
+}
+
+/// Returns JSON array of subcommand names for `path` (use empty string for top level).
+#[no_mangle]
+pub extern "C" fn ycallr_list_subcommands(
+    api: *const YcallrApi,
+    path: *const c_char,
+) -> *mut c_char {
+    if api.is_null() {
+        return std::ptr::null_mut();
+    }
+
+    let inner = unsafe { &(*api)._inner };
+    let path_str = if path.is_null() {
+        ""
+    } else {
+        match unsafe { cstr_to_str(path) } {
+            Some(s) => s,
+            None => {
+                set_last_error("Invalid UTF-8 in command path".into());
+                return std::ptr::null_mut();
+            }
+        }
+    };
+
+    let names = if path_str.is_empty() {
+        let mut names: Vec<String> = inner.commands.keys().cloned().collect();
+        names.sort();
+        names
+    } else {
+        match inner.list_subcommands(path_str) {
+            Ok(names) => names,
+            Err(e) => {
+                set_last_error(e.to_string());
+                return std::ptr::null_mut();
+            }
+        }
+    };
+
+    match serde_json::to_string(&names) {
+        Ok(json) => into_raw_cstring(json),
+        Err(e) => {
+            set_last_error(format!("Failed to serialize subcommands: {}", e));
+            std::ptr::null_mut()
+        }
+    }
+}
+
+/// Returns JSON array of missing required parameter names before a call.
+#[no_mangle]
+pub extern "C" fn ycallr_missing_params_json(
+    api: *const YcallrApi,
+    command_path: *const c_char,
+    params_json: *const c_char,
+) -> *mut c_char {
+    if api.is_null() {
+        set_last_error("Null API pointer".into());
+        return std::ptr::null_mut();
+    }
+
+    let path_str = match unsafe { cstr_to_str(command_path) } {
+        Some(s) => s,
+        None => {
+            set_last_error("Invalid UTF-8 in command path".into());
+            return std::ptr::null_mut();
+        }
+    };
+
+    let params = match parse_params(params_json) {
+        Ok(p) => p,
+        Err(err) => {
+            set_last_error(err);
+            return std::ptr::null_mut();
+        }
+    };
+
+    let inner = unsafe { (*api)._inner.as_ref() };
+    match compute_missing_params_json(inner, path_str, &params) {
+        Ok(json) => into_raw_cstring(json),
+        Err(err) => {
+            set_last_error(err);
+            std::ptr::null_mut()
+        }
+    }
+}
+
+/// Builds implicit JSON body for POST/PUT/PATCH when YAML has no body; NULL if none.
+#[no_mangle]
+pub extern "C" fn ycallr_build_implicit_body_json(
+    api: *const YcallrApi,
+    command_path: *const c_char,
+    params_json: *const c_char,
+) -> *mut c_char {
+    if api.is_null() {
+        set_last_error("Null API pointer".into());
+        return std::ptr::null_mut();
+    }
+
+    let path_str = match unsafe { cstr_to_str(command_path) } {
+        Some(s) => s,
+        None => {
+            set_last_error("Invalid UTF-8 in command path".into());
+            return std::ptr::null_mut();
+        }
+    };
+
+    let params = match parse_params(params_json) {
+        Ok(p) => p,
+        Err(err) => {
+            set_last_error(err);
+            return std::ptr::null_mut();
+        }
+    };
+
+    let inner = unsafe { (*api)._inner.as_ref() };
+    match compute_implicit_body_json(inner, path_str, &params) {
+        Some(json) => into_raw_cstring(json),
+        None => std::ptr::null_mut(),
+    }
+}
+
 // ─── Command ──────────────────────────────────────────────────────────
 
 pub struct YcallrCommand {
@@ -324,6 +655,8 @@ pub struct YcallrCommand {
     description: Option<String>,
     is_leaf: bool,
     is_branch: bool,
+    has_body: bool,
+    path_params: Vec<String>,
     auth: Option<String>,
     headers_json: String,
     params_json: String,
@@ -363,6 +696,8 @@ pub extern "C" fn ycallr_get_command(
         description: cmd.description.clone(),
         is_leaf: cmd.is_leaf(),
         is_branch: cmd.is_branch(),
+        has_body: cmd.body.is_some(),
+        path_params: cmd.endpoint_path_param_names(),
         auth: cmd.auth.clone(),
         headers_json,
         params_json,
@@ -462,6 +797,30 @@ pub extern "C" fn ycallr_command_is_branch(cmd: *const YcallrCommand) -> bool {
         return false;
     }
     unsafe { (*cmd).is_branch }
+}
+
+#[no_mangle]
+pub extern "C" fn ycallr_command_has_body(cmd: *const YcallrCommand) -> bool {
+    if cmd.is_null() {
+        return false;
+    }
+    unsafe { (*cmd).has_body }
+}
+
+/// Returns JSON array of path parameter names from the endpoint template.
+#[no_mangle]
+pub extern "C" fn ycallr_command_get_path_params_json(cmd: *const YcallrCommand) -> *mut c_char {
+    if cmd.is_null() {
+        return std::ptr::null_mut();
+    }
+    let names = unsafe { (*cmd).path_params.clone() };
+    match serde_json::to_string(&names) {
+        Ok(json) => into_raw_cstring(json),
+        Err(e) => {
+            set_last_error(format!("Failed to serialize path params: {}", e));
+            std::ptr::null_mut()
+        }
+    }
 }
 
 // ─── Client ───────────────────────────────────────────────────────────
@@ -729,7 +1088,39 @@ pub extern "C" fn ycallr_string_free(s: *mut c_char) {
     }
 }
 
-// ─── Keep from_raw_cstring for internal use ───────────────────────────
+#[cfg(test)]
+mod ffi_helper_tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    #[test]
+    fn test_missing_required_params_helper() {
+        let yaml = r#"
+name: g
+version: "1"
+base_url: https://api.example.com
+commands:
+  get-repo:
+    endpoint: /repos/{owner}/{repo}
+    method: GET
+    params:
+      owner:
+        description: o
+        type: string
+        required: true
+      repo:
+        description: r
+        type: string
+        required: true
+"#;
+        let bytes = crate::profile_store::compile_yaml_str(yaml).unwrap();
+        let def = crate::profile_store::load_from_proto_bytes(&bytes).unwrap();
+        let mut params = HashMap::new();
+        params.insert("owner".to_string(), "o".to_string());
+        let json = compute_missing_params_json(&def, "get-repo", &params).unwrap();
+        assert_eq!(json, r#"["repo"]"#);
+    }
+}
 
 unsafe fn from_raw_cstring(ptr: *mut c_char) -> CString {
     CString::from_raw(ptr)
