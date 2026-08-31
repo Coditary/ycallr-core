@@ -64,10 +64,11 @@ fn missing_required_params(
     }
 
     for path_param in cmd.endpoint_path_param_names() {
-        if !cmd.params.contains_key(&path_param) && !params.contains_key(&path_param) {
-            if !missing.contains(&path_param) {
-                missing.push(path_param);
-            }
+        if !cmd.params.contains_key(&path_param)
+            && !params.contains_key(&path_param)
+            && !missing.contains(&path_param)
+        {
+            missing.push(path_param);
         }
     }
 
@@ -129,6 +130,11 @@ unsafe fn cstr_to_str<'a>(ptr: *const c_char) -> Option<&'a str> {
         return None;
     }
     CStr::from_ptr(ptr).to_str().ok()
+}
+
+/// Safe read of NUL-terminated strings returned by ycallr FFI (`null` → `None`).
+pub fn c_string_to_str(ptr: *const c_char) -> Option<String> {
+    unsafe { cstr_to_str(ptr).map(|s| s.to_owned()) }
 }
 
 fn parse_required_json(ptr: *const c_char, field_name: &str) -> Result<serde_json::Value, String> {
