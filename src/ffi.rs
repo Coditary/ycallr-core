@@ -15,8 +15,9 @@ thread_local! {
 }
 
 fn set_last_error(msg: String) {
+    let sanitized = msg.replace('\0', "");
     LAST_ERROR.with(|e| {
-        *e.borrow_mut() = CString::new(msg).ok();
+        *e.borrow_mut() = CString::new(sanitized).ok();
     });
 }
 
@@ -48,19 +49,133 @@ unsafe fn cstr_to_str<'a>(ptr: *const c_char) -> Option<&'a str> {
     CStr::from_ptr(ptr).to_str().ok()
 }
 
-fn parse_json_opt(ptr: *const c_char) -> Option<serde_json::Value> {
-    let s = unsafe { cstr_to_str(ptr) }?;
-    serde_json::from_str(s).ok()
+fn parse_required_json(ptr: *const c_char, field_name: &str) -> Result<serde_json::Value, String> {
+    if ptr.is_null() {
+        return Err(format!("{} is required", field_name));
+    }
+
+    let s = match unsafe { cstr_to_str(ptr) } {
+        Some(s) => s,
+        None => return Err(format!("Invalid UTF-8 in {}", field_name)),
+    };
+
+    serde_json::from_str(s).map_err(|e| format!("Invalid {}: {}", field_name, e))
 }
 
-/// Parse a JSON string into HashMap<String,String>. Returns None on null or invalid.
-fn parse_params(ptr: *const c_char) -> Option<HashMap<String, String>> {
-    let s = unsafe { cstr_to_str(ptr) }?;
-    serde_json::from_str(s).ok()
+/// Parse optional JSON body. Null pointer yields None; invalid UTF-8 or JSON returns an error.
+fn parse_body_json(ptr: *const c_char) -> Result<Option<serde_json::Value>, String> {
+    if ptr.is_null() {
+        return Ok(None);
+    }
+
+    let s = match unsafe { cstr_to_str(ptr) } {
+        Some(s) => s,
+        None => return Err("Invalid UTF-8 in body_json".into()),
+    };
+
+    serde_json::from_str(s)
+        .map(Some)
+        .map_err(|e| format!("Invalid body_json: {}", e))
+}
+
+/// Parse a JSON object into HashMap<String,String>.
+/// Null pointer yields an empty map; invalid UTF-8 or JSON returns an error.
+fn parse_params(ptr: *const c_char) -> Result<HashMap<String, String>, String> {
+    if ptr.is_null() {
+        return Ok(HashMap::new());
+    }
+
+    let s = match unsafe { cstr_to_str(ptr) } {
+        Some(s) => s,
+        None => return Err("Invalid UTF-8 in params_json".into()),
+    };
+
+    serde_json::from_str(s).map_err(|e| format!("Invalid params_json: {}", e))
 }
 
 fn into_raw_cstring(s: String) -> *mut c_char {
-    CString::new(s).unwrap().into_raw()
+    match CString::new(s) {
+        Ok(c) => c.into_raw(),
+        Err(_) => {
+            set_last_error("String contains interior NUL byte".into());
+            std::ptr::null_mut()
+        }
+    }
+}
+
+fn parse_runtime_auth(
+    auth_type: &str,
+    auth_data: &serde_json::Value,
+) -> Result<AuthConfig, String> {
+    let auth = match auth_type {
+        "bearer" => {
+            let token = auth_data
+                .get("token")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.trim().is_empty())
+                .ok_or("bearer auth requires non-empty 'token'")?;
+            AuthConfig::bearer(token.to_string())
+        }
+        "api_key" => {
+            let key = auth_data
+                .get("key")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.trim().is_empty())
+                .ok_or("api_key auth requires non-empty 'key'")?;
+            let name = auth_data
+                .get("name")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.trim().is_empty())
+                .unwrap_or("X-API-Key");
+            let in_str = auth_data
+                .get("in")
+                .and_then(|v| v.as_str())
+                .unwrap_or("header");
+            let in_ = match in_str {
+                "header" => crate::models::ApiKeyLocation::Header,
+                "query" => crate::models::ApiKeyLocation::Query,
+                "cookie" => crate::models::ApiKeyLocation::Cookie,
+                other => {
+                    return Err(format!(
+                        "Unknown api_key location '{}': expected header, query, or cookie",
+                        other
+                    ));
+                }
+            };
+            AuthConfig::api_key_in(key.to_string(), name.to_string(), in_)
+        }
+        "http_basic" => {
+            let username = auth_data
+                .get("username")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.trim().is_empty())
+                .ok_or("http_basic auth requires non-empty 'username'")?;
+            let password = auth_data
+                .get("password")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.trim().is_empty())
+                .ok_or("http_basic auth requires non-empty 'password'")?;
+            AuthConfig::http_basic(username.to_string(), password.to_string())
+        }
+        "http_custom" => {
+            let prefix = auth_data
+                .get("prefix")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.trim().is_empty())
+                .ok_or("http_custom auth requires non-empty 'prefix'")?;
+            let token = auth_data
+                .get("token")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.trim().is_empty())
+                .ok_or("http_custom auth requires non-empty 'token'")?;
+            AuthConfig::http_custom(prefix.to_string(), token.to_string())
+        }
+        other => return Err(format!("Unknown auth_type: '{}'", other)),
+    };
+
+    crate::models::validate_auth_config("client", &auth).map_err(|e| e.to_string())?;
+
+    Ok(auth)
 }
 
 // ─── ApiDefinition ────────────────────────────────────────────────────
@@ -119,6 +234,39 @@ pub extern "C" fn ycallr_free_api(api: *mut YcallrApi) {
     }
 }
 
+/// Override base URL at runtime (e.g. point profile at a mock server). Returns 0 on success, -1 on error.
+#[no_mangle]
+pub extern "C" fn ycallr_set_base_url(api: *mut YcallrApi, url: *const c_char) -> i32 {
+    if api.is_null() {
+        set_last_error("Null API pointer".into());
+        return -1;
+    }
+
+    let url_str = match unsafe { cstr_to_str(url) } {
+        Some(s) => s,
+        None => {
+            set_last_error("Invalid UTF-8 in base_url".into());
+            return -1;
+        }
+    };
+
+    if url_str.trim().is_empty() {
+        set_last_error("Base URL cannot be empty".into());
+        return -1;
+    }
+
+    unsafe {
+        (*api)._inner.base_url = url_str.to_string();
+        let old = (*api).base_url;
+        (*api).base_url = into_raw_cstring((*api)._inner.base_url.clone());
+        if !old.is_null() {
+            let _ = from_raw_cstring(old);
+        }
+    }
+
+    0
+}
+
 #[no_mangle]
 pub extern "C" fn ycallr_get_name(api: *const YcallrApi) -> *const c_char {
     if api.is_null() {
@@ -161,7 +309,10 @@ pub extern "C" fn ycallr_list_commands(api: *const YcallrApi) -> *mut c_char {
     let names: Vec<&str> = inner.commands.keys().map(|s| s.as_str()).collect();
     match serde_json::to_string(&names) {
         Ok(json) => into_raw_cstring(json),
-        Err(_) => std::ptr::null_mut(),
+        Err(e) => {
+            set_last_error(format!("Failed to serialize command list: {}", e));
+            std::ptr::null_mut()
+        }
     }
 }
 
@@ -342,12 +493,18 @@ pub extern "C" fn ycallr_client_new(
         }
     };
 
-    let envs = parse_params(envs_json);
+    let envs = match parse_params(envs_json) {
+        Ok(vars) => vars,
+        Err(err) => {
+            set_last_error(err);
+            return std::ptr::null_mut();
+        }
+    };
 
     let mut builder = YcallrClient::builder(api_def).env_mode(mode);
 
-    if let Some(vars) = envs {
-        builder = builder.envs(vars);
+    if !envs.is_empty() {
+        builder = builder.envs(envs);
     }
 
     match builder.build() {
@@ -386,36 +543,18 @@ pub extern "C" fn ycallr_client_new_with_auth(
         }
     };
 
-    let auth_data = match parse_json_opt(auth_data_json) {
-        Some(d) => d,
-        None => {
-            set_last_error("Invalid JSON in auth_data_json".into());
+    let auth_data = match parse_required_json(auth_data_json, "auth_data_json") {
+        Ok(data) => data,
+        Err(err) => {
+            set_last_error(err);
             return std::ptr::null_mut();
         }
     };
 
-    let auth_config = match auth_type_str {
-        "bearer" => {
-            let token = auth_data["token"].as_str().unwrap_or("");
-            AuthConfig::bearer(token.to_string())
-        }
-        "api_key" => {
-            let key = auth_data["key"].as_str().unwrap_or("");
-            let name = auth_data["name"].as_str().unwrap_or("X-API-Key");
-            AuthConfig::api_key(key.to_string(), name.to_string())
-        }
-        "http_basic" => {
-            let username = auth_data["username"].as_str().unwrap_or("");
-            let password = auth_data["password"].as_str().unwrap_or("");
-            AuthConfig::http_basic(username.to_string(), password.to_string())
-        }
-        "http_custom" => {
-            let prefix = auth_data["prefix"].as_str().unwrap_or("");
-            let token = auth_data["token"].as_str().unwrap_or("");
-            AuthConfig::http_custom(prefix.to_string(), token.to_string())
-        }
-        other => {
-            set_last_error(format!("Unknown auth_type: '{}'", other));
+    let auth_config = match parse_runtime_auth(auth_type_str, &auth_data) {
+        Ok(auth) => auth,
+        Err(err) => {
+            set_last_error(err);
             return std::ptr::null_mut();
         }
     };
@@ -431,14 +570,20 @@ pub extern "C" fn ycallr_client_new_with_auth(
         }
     };
 
-    let envs = parse_params(envs_json);
+    let envs = match parse_params(envs_json) {
+        Ok(vars) => vars,
+        Err(err) => {
+            set_last_error(err);
+            return std::ptr::null_mut();
+        }
+    };
 
     let mut builder = YcallrClient::builder(api_def)
         .env_mode(mode)
         .auth(auth_config);
 
-    if let Some(vars) = envs {
-        builder = builder.envs(vars);
+    if !envs.is_empty() {
+        builder = builder.envs(envs);
     }
 
     match builder.build() {
@@ -487,8 +632,20 @@ pub extern "C" fn ycallr_call(
         }
     };
 
-    let params = parse_params(params_json).unwrap_or_default();
-    let body = parse_json_opt(body_json);
+    let params = match parse_params(params_json) {
+        Ok(params) => params,
+        Err(err) => {
+            set_last_error(err);
+            return std::ptr::null_mut();
+        }
+    };
+    let body = match parse_body_json(body_json) {
+        Ok(body) => body,
+        Err(err) => {
+            set_last_error(err);
+            return std::ptr::null_mut();
+        }
+    };
 
     let body_ref = body.as_ref();
 

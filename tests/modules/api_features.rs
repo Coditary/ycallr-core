@@ -227,3 +227,59 @@ fn test_nested_endpoint_resolution() {
     let resolved = cmd.resolve_endpoint(&params).unwrap();
     assert_eq!(resolved, "/repos/rust-lang/rust/issues");
 }
+
+#[test]
+fn test_validate_params_rejects_wrong_types_on_parsed_yaml() {
+    let yaml = r#"
+name: test
+version: "1.0.0"
+base_url: https://api.test.com
+commands:
+  test:
+    endpoint: /test
+    method: POST
+    params:
+      num_param:
+        description: Number param
+        type: number
+        required: true
+"#;
+
+    let api = ycallr_core::yaml_parser::parse_yaml(yaml).unwrap();
+    let cmd = api.commands.get("test").unwrap();
+
+    let result = cmd.validate_params(
+        &HashMap::from([("num_param".to_string(), "not-a-number".to_string())]),
+        None,
+    );
+    assert!(result.is_err());
+    assert!(result.unwrap_err().to_string().contains("must be a number"));
+}
+
+#[test]
+fn test_validate_rejects_loopback_base_url() {
+    let api = ApiDefinition {
+        name: "test-api".to_string(),
+        version: "1.0.0".to_string(),
+        description: "Test".to_string(),
+        base_url: "http://127.0.0.1".to_string(),
+        env: vec![],
+        auth: HashMap::new(),
+        commands: HashMap::new(),
+    };
+    assert!(api.validate().is_err());
+}
+
+#[test]
+fn test_validate_rejects_non_http_scheme() {
+    let api = ApiDefinition {
+        name: "test-api".to_string(),
+        version: "1.0.0".to_string(),
+        description: "Test".to_string(),
+        base_url: "ftp://api.test.com".to_string(),
+        env: vec![],
+        auth: HashMap::new(),
+        commands: HashMap::new(),
+    };
+    assert!(api.validate().is_err());
+}

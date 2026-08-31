@@ -295,6 +295,35 @@ fn test_nested_command_not_found() {
 }
 
 #[test]
+fn test_nested_command_details() {
+    let api = ycallr_core::yaml_parser::parse_yaml(NESTED_YAML).unwrap();
+
+    let repos = api.command_details("repos").unwrap();
+    assert_eq!(repos.path, "repos");
+    assert_eq!(repos.endpoint.as_deref(), Some("/repos"));
+    assert_eq!(repos.method.as_ref(), Some(&HttpMethod::GET));
+    assert!(repos.is_branch);
+    assert!(repos.is_leaf);
+    assert!(repos.is_callable);
+    assert_eq!(repos.subcommands, vec!["issues".to_string()]);
+
+    let issues = api.command_details("repos.issues").unwrap();
+    assert_eq!(
+        issues.subcommands,
+        vec!["create".to_string(), "list".to_string()]
+    );
+    assert!(issues.params.is_empty());
+
+    let users = api.command_details("users").unwrap();
+    assert_eq!(users.subcommands, vec!["get".to_string()]);
+
+    assert_eq!(
+        api.list_subcommands("repos.issues").unwrap(),
+        issues.subcommands
+    );
+}
+
+#[test]
 fn test_env_yaml_parsing() {
     let api = ycallr_core::yaml_parser::parse_yaml(ENV_YAML).unwrap();
     assert_eq!(api.env.len(), 2);

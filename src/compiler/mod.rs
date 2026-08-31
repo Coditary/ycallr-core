@@ -6,12 +6,17 @@ use crate::proto;
 use prost::Message;
 use std::collections::HashMap;
 
-use conversions::{command_from_proto, command_to_proto, env_from_proto, env_to_proto};
+use conversions::{
+    auth_from_proto, auth_to_proto, command_from_proto, command_to_proto, env_from_proto,
+    env_to_proto,
+};
 
 pub struct Compiler;
 
 impl Compiler {
     pub fn yaml_to_proto(api: &ApiDefinition) -> Result<Vec<u8>> {
+        api.validate_for_client()?;
+
         let proto_api = proto::ApiDefinition {
             name: api.name.clone(),
             version: api.version.clone(),
@@ -23,6 +28,11 @@ impl Compiler {
                 .map(|(k, v)| (k.clone(), command_to_proto(v)))
                 .collect(),
             env: api.env.iter().map(env_to_proto).collect(),
+            auth: api
+                .auth
+                .iter()
+                .map(|(k, v)| (k.clone(), auth_to_proto(v)))
+                .collect(),
         };
 
         Ok(proto_api.encode_to_vec())
@@ -39,15 +49,22 @@ impl Compiler {
 
         let env = proto_api.env.iter().map(env_from_proto).collect();
 
-        Ok(ApiDefinition {
+        let mut auth = HashMap::new();
+        for (k, v) in proto_api.auth {
+            auth.insert(k, auth_from_proto(&v)?);
+        }
+
+        let api = ApiDefinition {
             name: proto_api.name,
             version: proto_api.version,
             description: proto_api.description,
             base_url: proto_api.base_url,
             env,
-            auth: HashMap::new(),
+            auth,
             commands,
-        })
+        };
+        api.validate()?;
+        Ok(api)
     }
 }
 
@@ -65,7 +82,8 @@ impl ApiDefinition {
 mod tests {
     use super::*;
     use crate::models::{
-        Command, EnvVar, HttpMethod, ParamType, Parameter, ResponseConfig, ResponseEntry,
+        AuthConfig, Command, EnvVar, HttpMethod, ParamType, Parameter, ResponseConfig,
+        ResponseEntry,
     };
     use std::collections::HashMap;
 
@@ -302,24 +320,38 @@ mod tests {
     }
 
     #[test]
-    fn test_method_from_i32_fallback() {
-        assert_eq!(method_from_i32(0), HttpMethod::GET);
-        assert_eq!(method_from_i32(1), HttpMethod::POST);
-        assert_eq!(method_from_i32(2), HttpMethod::PUT);
-        assert_eq!(method_from_i32(3), HttpMethod::DELETE);
-        assert_eq!(method_from_i32(4), HttpMethod::PATCH);
-        assert_eq!(method_from_i32(99), HttpMethod::GET);
-        assert_eq!(method_from_i32(-1), HttpMethod::GET);
+    fn test_method_from_i32_valid_values() {
+        assert_eq!(method_from_i32(0).unwrap(), HttpMethod::GET);
+        assert_eq!(method_from_i32(1).unwrap(), HttpMethod::POST);
+        assert_eq!(method_from_i32(2).unwrap(), HttpMethod::PUT);
+        assert_eq!(method_from_i32(3).unwrap(), HttpMethod::DELETE);
+        assert_eq!(method_from_i32(4).unwrap(), HttpMethod::PATCH);
     }
 
     #[test]
-    fn test_type_from_i32_fallback() {
-        assert_eq!(type_from_i32(0), ParamType::String);
-        assert_eq!(type_from_i32(1), ParamType::Number);
-        assert_eq!(type_from_i32(2), ParamType::Boolean);
-        assert_eq!(type_from_i32(3), ParamType::Array);
-        assert_eq!(type_from_i32(99), ParamType::String);
-        assert_eq!(type_from_i32(-1), ParamType::String);
+    fn test_method_from_i32_invalid_errors() {
+        assert!(method_from_i32(99).is_err());
+        assert!(method_from_i32(-1).is_err());
+    }
+
+    #[test]
+    fn test_type_from_i32_valid_values() {
+        assert_eq!(type_from_i32(0).unwrap(), ParamType::String);
+        assert_eq!(type_from_i32(1).unwrap(), ParamType::Number);
+        assert_eq!(type_from_i32(2).unwrap(), ParamType::Boolean);
+        assert_eq!(type_from_i32(3).unwrap(), ParamType::Array);
+    }
+
+    #[test]
+    fn test_type_from_i32_invalid_errors() {
+        assert!(type_from_i32(99).is_err());
+        assert!(type_from_i32(-1).is_err());
+    }
+
+    #[test]
+    fn test_api_key_location_from_i32_invalid_errors() {
+        use super::conversions::api_key_location_from_i32;
+        assert!(api_key_location_from_i32(99).is_err());
     }
 
     #[test]
@@ -415,5 +447,90 @@ mod tests {
             responses.codes.get("404").unwrap().message,
             "{input.owner} does not exist"
         );
+    }
+
+    fn create_auth_api() -> ApiDefinition {
+        let mut auth = HashMap::new();
+        auth.insert(
+            "primary".to_string(),
+            AuthConfig::bearer("yaml-token".to_string()),
+        );
+        auth.insert(
+            "secondary".to_string(),
+            AuthConfig::api_key("api-key".to_string(), "X-API-Key".to_string()),
+        );
+
+        let mut commands = HashMap::new();
+        commands.insert(
+            "get-repo".to_string(),
+            Command {
+                description: Some("Get repo".to_string()),
+                endpoint: Some("/repos/{owner}/{repo}".to_string()),
+                method: Some(HttpMethod::GET),
+                auth: Some("primary".to_string()),
+                headers: HashMap::new(),
+                params: HashMap::new(),
+                body: None,
+                responses: None,
+                commands: None,
+            },
+        );
+
+        ApiDefinition {
+            name: "github".to_string(),
+            version: "1.0.0".to_string(),
+            description: "GitHub API".to_string(),
+            base_url: "https://api.github.com".to_string(),
+            env: vec![],
+            auth,
+            commands,
+        }
+    }
+
+    #[test]
+    fn test_auth_proto_roundtrip() {
+        let api = create_auth_api();
+        let proto_bytes = Compiler::yaml_to_proto(&api).unwrap();
+        let restored = Compiler::proto_to_yaml(&proto_bytes).unwrap();
+
+        assert_eq!(api.auth.len(), restored.auth.len());
+        assert!(restored.auth.contains_key("primary"));
+        assert!(restored.auth.contains_key("secondary"));
+
+        let primary = restored.auth.get("primary").unwrap();
+        assert_eq!(primary, &AuthConfig::bearer("yaml-token".to_string()));
+
+        let cmd = restored.commands.get("get-repo").unwrap();
+        assert_eq!(cmd.auth.as_deref(), Some("primary"));
+    }
+
+    #[test]
+    fn test_conversion_enum_errors_and_all_methods() {
+        use super::conversions::{
+            api_key_location_from_i32, api_key_location_to_proto, auth_from_proto,
+            auth_to_proto, method_from_i32, method_to_proto, type_from_i32, type_to_proto,
+        };
+        use crate::models::{ApiKeyLocation, HttpMethod, ParamType};
+        use crate::proto;
+
+        assert_eq!(method_to_proto(&HttpMethod::PUT), proto::HttpMethod::Put);
+        assert_eq!(method_to_proto(&HttpMethod::DELETE), proto::HttpMethod::Delete);
+        assert_eq!(method_to_proto(&HttpMethod::PATCH), proto::HttpMethod::Patch);
+        assert_eq!(type_to_proto(&ParamType::Boolean), proto::ParamType::Boolean);
+        assert_eq!(type_to_proto(&ParamType::Array), proto::ParamType::Array);
+        assert!(method_from_i32(99).is_err());
+        assert!(type_from_i32(99).is_err());
+        assert!(api_key_location_from_i32(99).is_err());
+        assert_eq!(
+            api_key_location_to_proto(&ApiKeyLocation::Cookie),
+            proto::ApiKeyLocation::Cookie
+        );
+
+        let http_auth = auth_to_proto(&AuthConfig::http_custom("P ".to_string(), "t".to_string()));
+        let restored = auth_from_proto(&http_auth).unwrap();
+        assert!(matches!(restored, AuthConfig::Http { .. }));
+
+        let missing = proto::AuthConfig { kind: None };
+        assert!(auth_from_proto(&missing).is_err());
     }
 }

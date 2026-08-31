@@ -1,5 +1,12 @@
-use crate::models::ApiDefinition;
+use std::collections::HashMap;
+
+use crate::call_engine::{
+    build_api_response, prepare_http_request, resolve_client_env, ClientContext, EnvMode,
+    PreparedBody, PreparedHttpRequest,
+};
+use crate::models::{ApiDefinition, ApiKeyLocation, AuthConfig};
 use wasm_bindgen::prelude::*;
+use wasm_bindgen_futures::{future_to_promise, JsFuture};
 
 #[wasm_bindgen]
 pub struct YcallrApi {
@@ -129,19 +136,7 @@ impl YcallrApi {
             .get_command(name)
             .ok()
             .and_then(|cmd| cmd.body.as_ref())
-            .and_then(|b| {
-                if b.json.is_some() {
-                    Some("json".to_string())
-                } else if b.form.is_some() {
-                    Some("form".to_string())
-                } else if b.multipart.is_some() {
-                    Some("multipart".to_string())
-                } else if b.raw.is_some() {
-                    Some("raw".to_string())
-                } else {
-                    None
-                }
-            })
+            .and_then(|b| b.active_body_kind().map(|k| k.to_string()))
     }
 
     pub fn to_json(&self) -> std::result::Result<String, JsValue> {
@@ -154,9 +149,338 @@ impl YcallrApi {
             .map_err(|e| JsValue::from_str(&e.to_string()))
     }
 
+    #[wasm_bindgen(getter)]
+    pub fn description(&self) -> String {
+        self.inner.description.clone()
+    }
+
+    #[wasm_bindgen(js_name = commandEndpoint)]
+    pub fn command_endpoint(&self, name: &str) -> Option<String> {
+        self.inner
+            .get_command(name)
+            .ok()
+            .and_then(|cmd| cmd.endpoint.clone())
+    }
+
+    #[wasm_bindgen(js_name = commandMethod)]
+    pub fn command_method(&self, name: &str) -> Option<String> {
+        self.inner
+            .get_command(name)
+            .ok()
+            .and_then(|cmd| cmd.method.as_ref().map(|m| m.as_str().to_string()))
+    }
+
+    #[wasm_bindgen(js_name = commandDescription)]
+    pub fn command_description(&self, name: &str) -> Option<String> {
+        self.inner
+            .get_command(name)
+            .ok()
+            .and_then(|cmd| cmd.description.clone())
+    }
+
+    #[wasm_bindgen(js_name = listCommands)]
+    pub fn list_commands(&self) -> String {
+        let names: Vec<&str> = self.inner.commands.keys().map(|s| s.as_str()).collect();
+        serde_json::to_string(&names).unwrap_or_else(|_| "[]".to_string())
+    }
+
+    #[wasm_bindgen(js_name = listSubcommands)]
+    pub fn list_subcommands(&self, path: &str) -> std::result::Result<String, JsValue> {
+        self.inner
+            .list_subcommands(path)
+            .map(|names| serde_json::to_string(&names).unwrap_or_else(|_| "[]".to_string()))
+            .map_err(|e| JsValue::from_str(&e.to_string()))
+    }
+
     #[wasm_bindgen(js_name = commandExists)]
     pub fn command_exists(&self, name: &str) -> bool {
         self.inner.get_command(name).is_ok()
+    }
+}
+
+#[wasm_bindgen]
+pub struct YcallrWasmClient {
+    context: ClientContext,
+}
+
+#[wasm_bindgen]
+impl YcallrWasmClient {
+    #[wasm_bindgen(js_name = createClient)]
+    pub fn create_client(
+        api: &YcallrApi,
+        env_json: Option<String>,
+        auth_type: Option<String>,
+        auth_data_json: Option<String>,
+    ) -> std::result::Result<YcallrWasmClient, JsValue> {
+        api.inner
+            .validate_for_client()
+            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+
+        let env_vars: HashMap<String, String> = if let Some(json) = env_json {
+            serde_json::from_str(&json).map_err(|e| JsValue::from_str(&e.to_string()))?
+        } else {
+            HashMap::new()
+        };
+
+        let auth = parse_wasm_auth(auth_type, auth_data_json)?;
+
+        let resolved_env = resolve_client_env(&api.inner, &EnvMode::Manual, &env_vars)
+            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+
+        Ok(YcallrWasmClient {
+            context: ClientContext {
+                api: api.inner.clone(),
+                auth,
+                auth_configs: api.inner.auth.clone(),
+                env_vars: resolved_env,
+            },
+        })
+    }
+
+    pub fn call(
+        &self,
+        command: &str,
+        params_json: &str,
+        body_json: Option<String>,
+    ) -> js_sys::Promise {
+        let ctx = self.context.clone();
+        let command = command.to_string();
+        let params_json = params_json.to_string();
+        let body_json = body_json;
+
+        future_to_promise(async move {
+            let params: HashMap<String, String> = serde_json::from_str(&params_json)
+                .map_err(|e| JsValue::from_str(&e.to_string()))?;
+
+            let body = if let Some(json) = body_json {
+                Some(serde_json::from_str(&json).map_err(|e| JsValue::from_str(&e.to_string()))?)
+            } else {
+                None
+            };
+
+            let prepared = prepare_http_request(&ctx, &command, &params, body.as_ref())
+                .map_err(|e| JsValue::from_str(&e.to_string()))?;
+
+            let fetch_result = execute_fetch(&prepared)
+                .await
+                .map_err(|e| JsValue::from_str(&e))?;
+
+            let api_response = build_api_response(
+                fetch_result.status,
+                fetch_result.headers,
+                fetch_result.body_text,
+                prepared.responses.as_ref(),
+                &prepared.params,
+            );
+
+            serde_json::to_string(&api_response)
+                .map_err(|e| JsValue::from_str(&e.to_string()))
+                .map(|s| JsValue::from_str(&s))
+        })
+    }
+}
+
+struct FetchResult {
+    status: u16,
+    headers: HashMap<String, String>,
+    body_text: String,
+}
+
+async fn execute_fetch(prepared: &PreparedHttpRequest) -> Result<FetchResult, String> {
+    use web_sys::{FormData, Headers, Request, RequestInit, RequestMode, Response};
+
+    let window = web_sys::window().ok_or_else(|| "No global window object".to_string())?;
+
+    let opts = RequestInit::new();
+    opts.set_method(prepared.method.as_str());
+    opts.set_mode(RequestMode::Cors);
+
+    let headers = Headers::new().map_err(|_| "Failed to create request headers".to_string())?;
+    for (key, value) in &prepared.headers {
+        headers
+            .set(key, value)
+            .map_err(|_| format!("Failed to set header '{}'", key))?;
+    }
+
+    match &prepared.body {
+        PreparedBody::None => {}
+        PreparedBody::Json(json) => {
+            if !prepared.headers.contains_key("Content-Type") {
+                headers
+                    .set("Content-Type", "application/json")
+                    .map_err(|_| "Failed to set Content-Type header".to_string())?;
+            }
+            let body_str = serde_json::to_string(json).map_err(|e| e.to_string())?;
+            let body_js = JsValue::from_str(&body_str);
+            opts.set_body(&body_js);
+        }
+        PreparedBody::Form(form) => {
+            let form_data = FormData::new().map_err(|_| "Failed to create FormData".to_string())?;
+            for (key, value) in form {
+                form_data
+                    .append_with_str(key, value)
+                    .map_err(|_| format!("Failed to append form field '{}'", key))?;
+            }
+            let form_js: JsValue = form_data.into();
+            opts.set_body(&form_js);
+        }
+        PreparedBody::Raw { content_type, body } => {
+            if !prepared.headers.contains_key("Content-Type") {
+                headers
+                    .set("Content-Type", content_type)
+                    .map_err(|_| "Failed to set Content-Type header".to_string())?;
+            }
+            let body_js = JsValue::from_str(body);
+            opts.set_body(&body_js);
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        PreparedBody::MultipartNative(_) => {
+            return Err("Multipart bodies are not supported in WASM".to_string());
+        }
+    }
+
+    opts.set_headers(&headers);
+
+    let request = Request::new_with_str_and_init(&prepared.url, &opts)
+        .map_err(|_| "Failed to create fetch request".to_string())?;
+
+    let response_value = JsFuture::from(window.fetch_with_request(&request))
+        .await
+        .map_err(|_| "Fetch request failed".to_string())?;
+
+    let response: Response = response_value
+        .dyn_into()
+        .map_err(|_| "Fetch did not return a Response".to_string())?;
+
+    let status = response.status();
+    let mut response_headers = HashMap::new();
+    if let Ok(content_type) = response.headers().get("content-type") {
+        if let Some(content_type) = content_type {
+            if !content_type.is_empty() {
+                response_headers.insert("content-type".to_string(), content_type);
+            }
+        }
+    }
+
+    let body_value = JsFuture::from(
+        response
+            .text()
+            .map_err(|_| "Failed to read response body")?,
+    )
+    .await
+    .map_err(|_| "Failed to await response body".to_string())?;
+
+    let body_text = body_value.as_string().unwrap_or_else(|| {
+        body_value
+            .as_f64()
+            .map(|n| n.to_string())
+            .unwrap_or_default()
+    });
+
+    Ok(FetchResult {
+        status,
+        headers: response_headers,
+        body_text,
+    })
+}
+
+fn parse_wasm_auth(
+    auth_type: Option<String>,
+    auth_data_json: Option<String>,
+) -> std::result::Result<Option<AuthConfig>, JsValue> {
+    match (auth_type, auth_data_json) {
+        (None, None) => Ok(None),
+        (Some(auth_type), Some(auth_data_json)) => {
+            let auth_data: serde_json::Value = serde_json::from_str(&auth_data_json)
+                .map_err(|e| JsValue::from_str(&e.to_string()))?;
+            parse_runtime_auth(&auth_type, &auth_data)
+                .map(Some)
+                .map_err(|e| JsValue::from_str(&e))
+        }
+        _ => Err(JsValue::from_str(
+            "auth_type and auth_data_json must both be provided for authenticated clients",
+        )),
+    }
+}
+
+fn parse_runtime_auth(
+    auth_type: &str,
+    auth_data: &serde_json::Value,
+) -> Result<AuthConfig, String> {
+    match auth_type {
+        "bearer" => {
+            let token = auth_data
+                .get("token")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.trim().is_empty())
+                .ok_or("bearer auth requires non-empty 'token'".to_string())?;
+            Ok(AuthConfig::bearer(token.to_string()))
+        }
+        "api_key" => {
+            let key = auth_data
+                .get("key")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.trim().is_empty())
+                .ok_or("api_key auth requires non-empty 'key'".to_string())?;
+            let name = auth_data
+                .get("name")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.trim().is_empty())
+                .unwrap_or("X-API-Key");
+            let in_str = auth_data
+                .get("in")
+                .and_then(|v| v.as_str())
+                .unwrap_or("header");
+            let in_ = match in_str {
+                "header" => ApiKeyLocation::Header,
+                "query" => ApiKeyLocation::Query,
+                "cookie" => ApiKeyLocation::Cookie,
+                other => {
+                    return Err(format!(
+                        "Unknown api_key location '{}': expected header, query, or cookie",
+                        other
+                    ));
+                }
+            };
+            Ok(AuthConfig::api_key_in(
+                key.to_string(),
+                name.to_string(),
+                in_,
+            ))
+        }
+        "http_basic" => {
+            let username = auth_data
+                .get("username")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.trim().is_empty())
+                .ok_or("http_basic auth requires non-empty 'username'".to_string())?;
+            let password = auth_data
+                .get("password")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.trim().is_empty())
+                .ok_or("http_basic auth requires non-empty 'password'".to_string())?;
+            Ok(AuthConfig::http_basic(
+                username.to_string(),
+                password.to_string(),
+            ))
+        }
+        "http_custom" => {
+            let prefix = auth_data
+                .get("prefix")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.trim().is_empty())
+                .ok_or("http_custom auth requires non-empty 'prefix'".to_string())?;
+            let token = auth_data
+                .get("token")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.trim().is_empty())
+                .ok_or("http_custom auth requires non-empty 'token'".to_string())?;
+            Ok(AuthConfig::http_custom(
+                prefix.to_string(),
+                token.to_string(),
+            ))
+        }
+        other => Err(format!("Unknown auth type '{}'", other)),
     }
 }
 
@@ -300,6 +624,20 @@ commands:
         assert_eq!(api.name(), "test-api");
         assert_eq!(api.version(), "1.0.0");
         assert_eq!(api.base_url(), "https://api.test.com");
+        assert_eq!(api.description(), "Test API for WASM");
+        assert_eq!(api.command_endpoint("get-item").unwrap(), "/items/{id}");
+        assert_eq!(api.command_method("get-item").unwrap(), "GET");
+    }
+
+    #[wasm_bindgen_test]
+    fn test_wasm_list_commands_and_subcommands() {
+        let api = YcallrApi::new(NESTED_YAML).unwrap();
+        let top = api.list_commands();
+        assert!(top.contains("repos"));
+        let issues = api.list_subcommands("repos").unwrap();
+        assert!(issues.contains("issues"));
+        let create = api.list_subcommands("repos.issues").unwrap();
+        assert!(create.contains("create"));
     }
 
     #[wasm_bindgen_test]
@@ -432,5 +770,28 @@ commands:
         let json = api.to_json().unwrap();
         assert!(json.contains("owner_id"));
         assert!(json.contains("{owner}"));
+    }
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod native_tests {
+    use super::*;
+
+    #[test]
+    fn test_runtime_auth_parsers_native() {
+        assert!(parse_wasm_auth(None, None).unwrap().is_none());
+
+        let bearer = parse_runtime_auth("bearer", &serde_json::json!({"token": "t"})).unwrap();
+        assert!(matches!(bearer, AuthConfig::Bearer { .. }));
+
+        let api_key = parse_runtime_auth(
+            "api_key",
+            &serde_json::json!({"key": "k", "name": "H", "in": "cookie"}),
+        )
+        .unwrap();
+        assert!(matches!(api_key, AuthConfig::ApiKey { .. }));
+
+        assert!(parse_runtime_auth("unknown", &serde_json::json!({})).is_err());
+        assert!(parse_runtime_auth("bearer", &serde_json::json!({"token": ""})).is_err());
     }
 }

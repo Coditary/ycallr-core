@@ -12,6 +12,7 @@ message ApiDefinition {
   string base_url = 4;
   map<string, Command> commands = 5;
   repeated EnvVar env = 6;
+  map<string, AuthConfig> auth = 7;
 }
 
 message Command {
@@ -21,8 +22,41 @@ message Command {
   map<string, string> headers = 3;
   map<string, Parameter> params = 4;
   map<string, Command> commands = 5;
-  optional BodyConfig body = 8;
   optional ResponseConfig responses = 7;
+  optional BodyConfig body = 8;
+  optional string auth = 9;
+}
+
+message AuthConfig {
+  oneof kind {
+    BearerAuth bearer = 1;
+    ApiKeyAuth api_key = 2;
+    HttpAuth http = 3;
+  }
+}
+
+message BearerAuth {
+  string token = 1;
+}
+
+message ApiKeyAuth {
+  string key = 1;
+  string name = 2;
+  ApiKeyLocation location = 3;
+}
+
+enum ApiKeyLocation {
+  HEADER = 0;
+  QUERY = 1;
+  COOKIE = 2;
+}
+
+message HttpAuth {
+  string scheme = 1;
+  optional string token = 2;
+  optional string username = 3;
+  optional string password = 4;
+  optional string prefix = 5;
 }
 
 message ResponseConfig {

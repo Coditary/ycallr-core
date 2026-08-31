@@ -1,6 +1,9 @@
 pub mod error;
 pub mod models;
 
+#[cfg(feature = "call-engine")]
+pub mod call_engine;
+
 #[cfg(feature = "yaml")]
 pub mod yaml_parser;
 

@@ -27,6 +27,12 @@ struct YcallrApi *ycallr_parse_yaml(const char *yaml);
 
 void ycallr_free_api(struct YcallrApi *api);
 
+/**
+ * Override base URL at runtime (e.g. point profile at a mock server). Returns 0 on success, -1 on error.
+ */
+int32_t ycallr_set_base_url(struct YcallrApi *api,
+                            const char *url);
+
 const char *ycallr_get_name(const struct YcallrApi *api);
 
 const char *ycallr_get_version(const struct YcallrApi *api);

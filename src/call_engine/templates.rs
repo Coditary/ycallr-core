@@ -8,7 +8,12 @@ pub fn resolve_env_vars(text: &str, env_vars: &HashMap<String, String>) -> crate
 
     for cap in re.captures_iter(text) {
         let var_name = &cap[1];
-        let replacement = env_vars.get(var_name).map(|s| s.as_str()).unwrap_or("");
+        let replacement = env_vars.get(var_name).ok_or_else(|| {
+            crate::YcallrError::EnvVar(format!(
+                "Unknown environment variable '{}' in template",
+                var_name
+            ))
+        })?;
         result = result.replace(&cap[0], replacement);
     }
 
@@ -24,31 +29,45 @@ pub fn resolve_response_template(
     let mut result = template.to_string();
 
     for cap in re.captures_iter(template) {
+        let full_match = cap.get(0).map(|m| m.as_str()).unwrap_or("");
         let prefix = &cap[1];
         let field = &cap[2];
 
         let replacement = match prefix {
-            "input" => params.get(field).map(|s| s.as_str()).unwrap_or(""),
-            "output" => {
-                if let Some(val) = body.get(field) {
-                    match val {
-                        serde_json::Value::String(s) => s.as_str(),
-                        other => {
-                            let s = other.to_string();
-                            return result.replace(&cap[0], &s);
-                        }
-                    }
-                } else {
-                    ""
-                }
-            }
-            _ => "",
+            "input" => params.get(field).cloned(),
+            "output" => json_path(body, field).map(value_to_template_string),
+            _ => None,
         };
 
-        result = result.replace(&cap[0], replacement);
+        if let Some(repl) = replacement {
+            result = result.replace(full_match, &repl);
+        }
     }
 
     result
+}
+
+fn json_path<'a>(value: &'a serde_json::Value, path: &str) -> Option<&'a serde_json::Value> {
+    let mut current = value;
+    for segment in path.split('.') {
+        if segment.is_empty() {
+            return None;
+        }
+        current = if let Ok(index) = segment.parse::<usize>() {
+            current.get(index)?
+        } else {
+            current.get(segment)?
+        };
+    }
+    Some(current)
+}
+
+fn value_to_template_string(value: &serde_json::Value) -> String {
+    match value {
+        serde_json::Value::String(s) => s.clone(),
+        serde_json::Value::Null => String::new(),
+        other => other.to_string(),
+    }
 }
 
 pub fn resolve_string_templates(text: &str, params: &HashMap<String, String>) -> String {
@@ -84,10 +103,7 @@ pub fn resolve_body(
                 .iter()
                 .map(|f| crate::models::MultipartField {
                     name: resolve_string_templates(&f.name, params),
-                    text: f
-                        .text
-                        .as_ref()
-                        .map(|t| resolve_string_templates(t, params)),
+                    text: f.text.as_ref().map(|t| resolve_string_templates(t, params)),
                     file: f.file.clone(),
                 })
                 .collect()
@@ -134,6 +150,32 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_resolve_json_templates_array_and_object() {
+        let params = HashMap::from([
+            ("name".to_string(), "rust".to_string()),
+            ("tag".to_string(), "1.0".to_string()),
+        ]);
+        let value = serde_json::json!({
+            "items": ["{name}", {"v": "{tag}"}],
+            "meta": {"name": "{name}"}
+        });
+        let resolved = resolve_json_templates(&value, &params).unwrap();
+        assert_eq!(resolved["items"][0], "rust");
+        assert_eq!(resolved["items"][1]["v"], "1.0");
+        assert_eq!(resolved["meta"]["name"], "rust");
+    }
+
+    #[test]
+    fn test_resolve_json_templates_non_string_passthrough() {
+        let params = HashMap::new();
+        let value = serde_json::json!([1, true, null]);
+        let resolved = resolve_json_templates(&value, &params).unwrap();
+        assert_eq!(resolved[0], 1);
+        assert_eq!(resolved[1], true);
+        assert!(resolved[2].is_null());
+    }
+
+    #[test]
     fn test_resolve_env_vars() {
         let mut env_vars = HashMap::new();
         env_vars.insert("TOKEN".to_string(), "abc123".to_string());
@@ -144,8 +186,19 @@ mod tests {
     #[test]
     fn test_resolve_env_vars_unknown() {
         let env_vars = HashMap::new();
-        let result = resolve_env_vars("${UNKNOWN}", &env_vars).unwrap();
-        assert_eq!(result, "");
+        let result = resolve_env_vars("${UNKNOWN}", &env_vars);
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Unknown environment variable 'UNKNOWN'"));
+    }
+
+    #[test]
+    fn test_resolve_env_vars_optional_empty() {
+        let env_vars = HashMap::from([("OPTIONAL".to_string(), String::new())]);
+        let result = resolve_env_vars("version=${OPTIONAL}", &env_vars).unwrap();
+        assert_eq!(result, "version=");
     }
 
     #[test]
@@ -172,6 +225,16 @@ mod tests {
     }
 
     #[test]
+    fn test_resolve_response_template_output_number_first() {
+        let params = HashMap::new();
+        let body = serde_json::json!({"name": "rust", "stars": 90000});
+
+        let result =
+            resolve_response_template("{output.stars} stars for {output.name}", &params, &body);
+        assert_eq!(result, "90000 stars for rust");
+    }
+
+    #[test]
     fn test_resolve_response_template_mixed() {
         let mut params = HashMap::new();
         params.insert("owner".to_string(), "rust-lang".to_string());
@@ -187,7 +250,43 @@ mod tests {
         let body = serde_json::json!({"name": "rust"});
 
         let result = resolve_response_template("{output.missing}", &params, &body);
-        assert_eq!(result, "");
+        assert_eq!(result, "{output.missing}");
+    }
+
+    #[test]
+    fn test_resolve_response_template_nested_output() {
+        let params = HashMap::new();
+        let body = serde_json::json!({
+            "user": { "name": "rust", "id": 42 },
+            "meta": { "count": 3 }
+        });
+
+        let result = resolve_response_template(
+            "User {output.user.name} (#{output.user.id})",
+            &params,
+            &body,
+        );
+        assert_eq!(result, "User rust (#42)");
+    }
+
+    #[test]
+    fn test_resolve_response_template_nested_output_array_index() {
+        let params = HashMap::new();
+        let body = serde_json::json!({
+            "items": [{ "title": "first" }, { "title": "second" }]
+        });
+
+        let result = resolve_response_template("{output.items.0.title}", &params, &body);
+        assert_eq!(result, "first");
+    }
+
+    #[test]
+    fn test_resolve_response_template_nested_missing_path() {
+        let params = HashMap::new();
+        let body = serde_json::json!({ "user": { "name": "rust" } });
+
+        let result = resolve_response_template("{output.user.email}", &params, &body);
+        assert_eq!(result, "{output.user.email}");
     }
 
     #[test]
@@ -215,5 +314,32 @@ mod tests {
         let resolved = resolve_json_templates(&value, &params).unwrap();
         assert_eq!(resolved[0], "test");
         assert_eq!(resolved[1], "static");
+    }
+
+    #[test]
+    fn test_resolve_json_templates_nested_object() {
+        let mut params = HashMap::new();
+        params.insert("owner".to_string(), "rust-lang".to_string());
+        let value = serde_json::json!({"data": {"owner": "{owner}"}});
+        let resolved = resolve_json_templates(&value, &params).unwrap();
+        assert_eq!(resolved["data"]["owner"], "rust-lang");
+    }
+
+    #[test]
+    fn test_resolve_env_vars_multiple_in_one_string() {
+        let env = HashMap::from([
+            ("A".to_string(), "alpha".to_string()),
+            ("B".to_string(), "beta".to_string()),
+        ]);
+        let result = resolve_env_vars("prefix-${A}-mid-${B}-suffix", &env).unwrap();
+        assert_eq!(result, "prefix-alpha-mid-beta-suffix");
+    }
+
+    #[test]
+    fn test_resolve_response_template_input_missing() {
+        let params = HashMap::new();
+        let body = serde_json::json!({"name": "rust"});
+        let result = resolve_response_template("Owner: {input.owner}", &params, &body);
+        assert_eq!(result, "Owner: {input.owner}");
     }
 }

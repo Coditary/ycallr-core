@@ -1,6 +1,7 @@
-use crate::error::Result;
+use crate::error::{Result, YcallrError};
 use crate::models::{
-    BodyConfig, Command, EnvVar, HttpMethod, ParamType, Parameter, ResponseConfig, ResponseEntry,
+    ApiKeyLocation, AuthConfig, BodyConfig, Command, EnvVar, HttpMethod, ParamType, Parameter,
+    ResponseConfig, ResponseEntry,
 };
 use crate::proto;
 
@@ -25,6 +26,7 @@ pub fn command_to_proto(cmd: &Command) -> proto::Command {
         commands,
         body: cmd.body.as_ref().map(body_to_proto),
         responses: cmd.responses.as_ref().map(response_config_to_proto),
+        auth: cmd.auth.clone(),
     }
 }
 
@@ -42,11 +44,14 @@ pub fn command_from_proto(cmd: &proto::Command) -> Result<Command> {
     Ok(Command {
         description: cmd.description.clone(),
         endpoint: cmd.endpoint.clone(),
-        method: cmd.method.map(|m| method_from_i32(m)),
-        auth: None,
+        method: cmd.method.map(method_from_i32).transpose()?,
+        auth: cmd.auth.clone(),
         headers: cmd.headers.clone(),
         params,
-        body: cmd.body.as_ref().map(body_from_proto),
+        body: match &cmd.body {
+            Some(body) => Some(body_from_proto(body)?),
+            None => None,
+        },
         responses: cmd.responses.as_ref().map(response_config_from_proto),
         commands: if commands.is_empty() {
             None
@@ -126,12 +131,18 @@ pub fn body_to_proto(body: &BodyConfig) -> proto::BodyConfig {
     }
 }
 
-pub fn body_from_proto(body: &proto::BodyConfig) -> BodyConfig {
-    BodyConfig {
-        json: body
-            .json
-            .as_ref()
-            .and_then(|s| serde_json::from_str(s).ok()),
+pub fn body_from_proto(body: &proto::BodyConfig) -> Result<BodyConfig> {
+    let json = if let Some(s) = &body.json {
+        Some(
+            serde_json::from_str(s)
+                .map_err(|e| YcallrError::Protobuf(format!("Invalid JSON in body.json: {}", e)))?,
+        )
+    } else {
+        None
+    };
+
+    Ok(BodyConfig {
+        json,
         form: if body.fields.is_empty() {
             None
         } else {
@@ -152,7 +163,7 @@ pub fn body_from_proto(body: &proto::BodyConfig) -> BodyConfig {
                     .collect(),
             )
         },
-    }
+    })
 }
 
 pub fn env_to_proto(env: &EnvVar) -> proto::EnvVar {
@@ -179,14 +190,17 @@ pub fn method_to_proto(method: &HttpMethod) -> proto::HttpMethod {
     }
 }
 
-pub fn method_from_i32(method: i32) -> HttpMethod {
+pub fn method_from_i32(method: i32) -> Result<HttpMethod> {
     match method {
-        0 => HttpMethod::GET,
-        1 => HttpMethod::POST,
-        2 => HttpMethod::PUT,
-        3 => HttpMethod::DELETE,
-        4 => HttpMethod::PATCH,
-        _ => HttpMethod::GET,
+        0 => Ok(HttpMethod::GET),
+        1 => Ok(HttpMethod::POST),
+        2 => Ok(HttpMethod::PUT),
+        3 => Ok(HttpMethod::DELETE),
+        4 => Ok(HttpMethod::PATCH),
+        _ => Err(YcallrError::Protobuf(format!(
+            "Unknown HTTP method enum value: {}",
+            method
+        ))),
     }
 }
 
@@ -201,7 +215,7 @@ pub fn param_to_proto(param: &Parameter) -> proto::Parameter {
 pub fn param_from_proto(param: &proto::Parameter) -> Result<Parameter> {
     Ok(Parameter {
         description: param.description.clone(),
-        param_type: type_from_i32(param.r#type),
+        param_type: type_from_i32(param.r#type)?,
         required: param.required,
     })
 }
@@ -215,12 +229,90 @@ pub fn type_to_proto(t: &ParamType) -> proto::ParamType {
     }
 }
 
-pub fn type_from_i32(t: i32) -> ParamType {
+pub fn type_from_i32(t: i32) -> Result<ParamType> {
     match t {
-        0 => ParamType::String,
-        1 => ParamType::Number,
-        2 => ParamType::Boolean,
-        3 => ParamType::Array,
-        _ => ParamType::String,
+        0 => Ok(ParamType::String),
+        1 => Ok(ParamType::Number),
+        2 => Ok(ParamType::Boolean),
+        3 => Ok(ParamType::Array),
+        _ => Err(YcallrError::Protobuf(format!(
+            "Unknown parameter type enum value: {}",
+            t
+        ))),
+    }
+}
+
+pub fn auth_to_proto(auth: &AuthConfig) -> proto::AuthConfig {
+    match auth {
+        AuthConfig::Bearer { token } => proto::AuthConfig {
+            kind: Some(proto::auth_config::Kind::Bearer(proto::BearerAuth {
+                token: token.clone(),
+            })),
+        },
+        AuthConfig::ApiKey { key, name, in_ } => proto::AuthConfig {
+            kind: Some(proto::auth_config::Kind::ApiKey(proto::ApiKeyAuth {
+                key: key.clone(),
+                name: name.clone(),
+                location: api_key_location_to_proto(in_) as i32,
+            })),
+        },
+        AuthConfig::Http {
+            scheme,
+            token,
+            username,
+            password,
+            prefix,
+        } => proto::AuthConfig {
+            kind: Some(proto::auth_config::Kind::Http(proto::HttpAuth {
+                scheme: scheme.clone(),
+                token: token.clone(),
+                username: username.clone(),
+                password: password.clone(),
+                prefix: prefix.clone(),
+            })),
+        },
+    }
+}
+
+pub fn auth_from_proto(auth: &proto::AuthConfig) -> Result<AuthConfig> {
+    match &auth.kind {
+        Some(proto::auth_config::Kind::Bearer(bearer)) => Ok(AuthConfig::Bearer {
+            token: bearer.token.clone(),
+        }),
+        Some(proto::auth_config::Kind::ApiKey(api_key)) => Ok(AuthConfig::ApiKey {
+            key: api_key.key.clone(),
+            name: api_key.name.clone(),
+            in_: api_key_location_from_i32(api_key.location)?,
+        }),
+        Some(proto::auth_config::Kind::Http(http)) => Ok(AuthConfig::Http {
+            scheme: http.scheme.clone(),
+            token: http.token.clone(),
+            username: http.username.clone(),
+            password: http.password.clone(),
+            prefix: http.prefix.clone(),
+        }),
+        None => Err(YcallrError::Protobuf(
+            "AuthConfig has no variant set".into(),
+        )),
+    }
+}
+
+pub fn api_key_location_to_proto(location: &ApiKeyLocation) -> proto::ApiKeyLocation {
+    match location {
+        ApiKeyLocation::Header => proto::ApiKeyLocation::Header,
+        ApiKeyLocation::Query => proto::ApiKeyLocation::Query,
+        ApiKeyLocation::Cookie => proto::ApiKeyLocation::Cookie,
+    }
+}
+
+pub fn api_key_location_from_i32(location: i32) -> Result<ApiKeyLocation> {
+    match location {
+        0 => Ok(ApiKeyLocation::Header),
+        1 => Ok(ApiKeyLocation::Query),
+        2 => Ok(ApiKeyLocation::Cookie),
+        _ => Err(YcallrError::Protobuf(format!(
+            "Unknown API key location enum value: {}",
+            location
+        ))),
     }
 }

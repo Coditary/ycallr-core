@@ -17,8 +17,8 @@ serde_json = "1.0"
 prost = "0.12"
 thiserror = "1.0"
 regex = "1.10"
-multer = "3"
 base64 = "0.22"
+percent-encoding = "2.3"
 
 [build-dependencies]
 prost-build = "0.12"
@@ -36,11 +36,17 @@ mockito = "1.6"
 default = ["yaml", "protobuf"]
 yaml = []
 protobuf = []
-client = ["dep:reqwest"]
+call-engine = []
+client = ["call-engine", "dep:reqwest"]
 test-utils = ["client"]
 ffi = ["client", "yaml"]
-wasm = ["dep:wasm-bindgen"]
-uniffi = ["dep:uniffi"]
+wasm = [
+    "call-engine",
+    "dep:wasm-bindgen",
+    "dep:wasm-bindgen-futures",
+    "dep:js-sys",
+    "dep:web-sys",
+]
 
 [dependencies.reqwest]
 version = "0.12"
@@ -51,9 +57,29 @@ optional = true
 version = "0.2"
 optional = true
 
-[dependencies.uniffi]
-version = "0.28"
+[dependencies.wasm-bindgen-futures]
+version = "0.4"
 optional = true
+
+[dependencies.js-sys]
+version = "0.3"
+optional = true
+
+[dependencies.web-sys]
+version = "0.3"
+optional = true
+features = [
+    "FormData",
+    "Headers",
+    "Request",
+    "RequestInit",
+    "RequestMode",
+    "Response",
+    "Window",
+]
+
+[package.metadata.tarpaulin]
+exclude-files = ["src/wasm.rs"]
 
 [profile.release]
 lto = true

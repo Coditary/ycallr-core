@@ -1,27 +1,20 @@
-mod types;
-mod response;
 mod command;
+mod command_details;
+mod response;
+mod types;
+mod validation;
 
+pub use command::{command_auth_is_none, COMMAND_AUTH_NONE};
+pub use command_details::CommandDetails;
 pub use types::*;
 
 impl ApiDefinition {
     pub fn validate(&self) -> crate::Result<()> {
-        if self.name.is_empty() {
-            return Err(crate::YcallrError::InvalidDefinition(
-                "API name cannot be empty".into(),
-            ));
-        }
-        if !self.name.chars().all(|c| c.is_alphanumeric() || c == '-') {
-            return Err(crate::YcallrError::InvalidDefinition(
-                "API name must be alphanumeric or dash".into(),
-            ));
-        }
-        if self.base_url.is_empty() {
-            return Err(crate::YcallrError::InvalidDefinition(
-                "Base URL cannot be empty".into(),
-            ));
-        }
-        Ok(())
+        validation::validate_api(self)
+    }
+
+    pub fn validate_for_client(&self) -> crate::Result<()> {
+        validation::validate_api_for_client(self)
     }
 
     pub fn get_command(&self, path: &str) -> crate::Result<&Command> {
@@ -42,6 +35,10 @@ impl ApiDefinition {
             cmd.get_command_recursive(&parts[1..])
         }
     }
+}
+
+pub fn validate_auth_config(name: &str, auth: &AuthConfig) -> crate::Result<()> {
+    validation::validate_auth_config(name, auth)
 }
 
 #[cfg(test)]
@@ -259,6 +256,54 @@ mod tests {
         let cmd = cmd.unwrap();
         assert!(cmd.is_branch());
         assert!(cmd.is_leaf());
+    }
+
+    #[test]
+    fn test_command_details_hybrid() {
+        let api = create_nested_api();
+        let details = api.command_details("repos").unwrap();
+        assert_eq!(details.path, "repos");
+        assert_eq!(details.endpoint.as_deref(), Some("/repos"));
+        assert_eq!(details.method.as_ref(), Some(&HttpMethod::GET));
+        assert!(details.is_branch);
+        assert!(details.is_leaf);
+        assert!(details.is_callable);
+        assert!(details.params.is_empty());
+        assert_eq!(details.subcommands, vec!["issues".to_string()]);
+    }
+
+    #[test]
+    fn test_command_details_leaf_params_not_inherited() {
+        let api = create_nested_api();
+        let issues = api.command_details("repos.issues").unwrap();
+        assert!(issues.params.is_empty());
+        assert_eq!(
+            issues.subcommands,
+            vec!["create".to_string(), "list".to_string()]
+        );
+
+        let create = api.command_details("repos.issues.create").unwrap();
+        assert!(create.params.is_empty());
+        assert!(create.subcommands.is_empty());
+        assert!(create.is_leaf);
+        assert!(!create.is_branch);
+    }
+
+    #[test]
+    fn test_list_subcommands() {
+        let api = create_nested_api();
+        assert_eq!(
+            api.list_subcommands("repos").unwrap(),
+            vec!["issues".to_string()]
+        );
+        assert_eq!(
+            api.list_subcommands("repos.issues").unwrap(),
+            vec!["create".to_string(), "list".to_string()]
+        );
+        assert!(api
+            .list_subcommands("repos.issues.create")
+            .unwrap()
+            .is_empty());
     }
 
     #[test]

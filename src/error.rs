@@ -38,6 +38,13 @@ mod tests {
     fn test_error_display() {
         let err = YcallrError::HttpClient("connection refused".to_string());
         assert_eq!(err.to_string(), "HTTP client error: connection refused");
+        assert!(YcallrError::YamlParse("bad".into()).to_string().contains("YAML"));
+        assert!(YcallrError::InvalidDefinition("bad".into()).to_string().contains("Invalid"));
+        assert!(YcallrError::CommandNotFound("x".into()).to_string().contains("not found"));
+        assert!(YcallrError::ParamValidation("bad".into()).to_string().contains("Parameter"));
+        assert!(YcallrError::Protobuf("bad".into()).to_string().contains("Protobuf"));
+        assert!(YcallrError::Serialization("bad".into()).to_string().contains("Serialization"));
+        assert!(YcallrError::EnvVar("bad".into()).to_string().contains("Environment"));
     }
 
     #[test]

@@ -1,10 +1,10 @@
-mod mock;
 mod apis;
 mod helpers;
+mod mock;
 
-pub use mock::*;
 pub use apis::*;
 pub use helpers::*;
+pub use mock::*;
 
 #[cfg(test)]
 mod tests {

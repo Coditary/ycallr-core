@@ -1,9 +1,10 @@
 use std::collections::HashMap;
 
-use crate::error::{Result, YcallrError};
+use crate::call_engine::{resolve_client_env, EnvMode};
+use crate::error::Result;
 use crate::models::ApiDefinition;
 
-use super::types::{AuthConfig, EnvMode};
+use super::types::AuthConfig;
 use super::YcallrClient;
 
 pub struct YcallrClientBuilder {
@@ -43,45 +44,27 @@ impl YcallrClientBuilder {
         self
     }
 
+    pub fn build_context(&self) -> Result<crate::call_engine::ClientContext> {
+        self.api.validate_for_client()?;
+        let resolved_env = resolve_client_env(&self.api, &self.env_mode, &self.env_vars)?;
+        Ok(crate::call_engine::ClientContext {
+            api: self.api.clone(),
+            auth: self.auth.clone(),
+            auth_configs: self.api.auth.clone(),
+            env_vars: resolved_env,
+        })
+    }
+
     pub fn build(self) -> Result<YcallrClient> {
-        let mut resolved_env = HashMap::new();
+        self.api.validate_for_client()?;
 
-        for env_var in &self.api.env {
-            match self.env_mode {
-                EnvMode::Auto => {
-                    if let Ok(val) = std::env::var(&env_var.name) {
-                        resolved_env.insert(env_var.name.clone(), val);
-                    } else if let Some(val) = self.env_vars.get(&env_var.name) {
-                        resolved_env.insert(env_var.name.clone(), val.clone());
-                    }
-                }
-                EnvMode::Manual => {
-                    if let Some(val) = self.env_vars.get(&env_var.name) {
-                        resolved_env.insert(env_var.name.clone(), val.clone());
-                    }
-                }
-            }
-        }
-
-        for (key, value) in &self.env_vars {
-            resolved_env
-                .entry(key.clone())
-                .or_insert_with(|| value.clone());
-        }
-
-        for env_var in &self.api.env {
-            if env_var.required && !resolved_env.contains_key(&env_var.name) {
-                return Err(YcallrError::EnvVar(format!(
-                    "Required environment variable '{}' is not set",
-                    env_var.name
-                )));
-            }
-        }
+        let resolved_env = resolve_client_env(&self.api, &self.env_mode, &self.env_vars)?;
 
         let http_client = reqwest::blocking::Client::builder()
             .timeout(std::time::Duration::from_secs(30))
+            .redirect(reqwest::redirect::Policy::none())
             .build()
-            .map_err(|e| YcallrError::HttpClient(e.to_string()))?;
+            .map_err(|e| crate::YcallrError::HttpClient(e.to_string()))?;
 
         let auth_configs = self.api.auth.clone();
 
@@ -93,5 +76,16 @@ impl YcallrClientBuilder {
             env_mode: self.env_mode,
             env_vars: resolved_env,
         })
+    }
+}
+
+pub(crate) fn validate_declared_env_key(api: &ApiDefinition, key: &str) -> Result<()> {
+    if api.env.iter().any(|e| e.name == key) {
+        Ok(())
+    } else {
+        Err(crate::YcallrError::EnvVar(format!(
+            "Environment variable '{}' is not declared in the API profile",
+            key
+        )))
     }
 }

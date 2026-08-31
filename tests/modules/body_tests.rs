@@ -154,6 +154,26 @@ commands:
       raw: "fallback {token}"
 "#;
 
+const MIXED_BODY_YAML_JSON_ONLY: &str = r#"
+name: mixed-api
+version: "1.0.0"
+base_url: https://api.test.com
+commands:
+  complex:
+    endpoint: /complex
+    method: POST
+    params:
+      token:
+        description: Auth token
+        type: string
+        required: true
+    body:
+      json:
+        auth: "{token}"
+        data:
+          nested: true
+"#;
+
 #[test]
 fn test_body_yaml_parsing() {
     let api = ycallr_core::yaml_parser::parse_yaml(BODY_YAML).unwrap();
@@ -259,7 +279,14 @@ fn test_form_body_template_resolution() {
     let client = ycallr_core::YcallrClient::new(api).unwrap();
     let body_config = client
         .resolve_body(
-            &client.api().commands.get("login").unwrap().body.as_ref().unwrap(),
+            &client
+                .api()
+                .commands
+                .get("login")
+                .unwrap()
+                .body
+                .as_ref()
+                .unwrap(),
             &params,
         )
         .unwrap();
@@ -275,13 +302,19 @@ fn test_raw_body_yaml_parsing() {
 
     let send_xml = api.commands.get("send-xml").unwrap();
     let body = send_xml.body.as_ref().unwrap();
-    assert_eq!(body.raw.as_ref().unwrap(), "<request><name>{name}</name></request>");
+    assert_eq!(
+        body.raw.as_ref().unwrap(),
+        "<request><name>{name}</name></request>"
+    );
     assert!(body.json.is_none());
     assert!(body.form.is_none());
 
     let send_text = api.commands.get("send-text").unwrap();
     let body = send_text.body.as_ref().unwrap();
-    assert_eq!(body.raw.as_ref().unwrap(), "Hello {content}, this is raw text");
+    assert_eq!(
+        body.raw.as_ref().unwrap(),
+        "Hello {content}, this is raw text"
+    );
 }
 
 #[test]
@@ -292,11 +325,17 @@ fn test_raw_body_protobuf_roundtrip() {
 
     let send_xml = restored.commands.get("send-xml").unwrap();
     let body = send_xml.body.as_ref().unwrap();
-    assert_eq!(body.raw.as_ref().unwrap(), "<request><name>{name}</name></request>");
+    assert_eq!(
+        body.raw.as_ref().unwrap(),
+        "<request><name>{name}</name></request>"
+    );
 
     let send_text = restored.commands.get("send-text").unwrap();
     let body = send_text.body.as_ref().unwrap();
-    assert_eq!(body.raw.as_ref().unwrap(), "Hello {content}, this is raw text");
+    assert_eq!(
+        body.raw.as_ref().unwrap(),
+        "Hello {content}, this is raw text"
+    );
 }
 
 #[test]
@@ -308,12 +347,22 @@ fn test_raw_body_template_resolution() {
     let client = ycallr_core::YcallrClient::new(api).unwrap();
     let body_config = client
         .resolve_body(
-            &client.api().commands.get("send-xml").unwrap().body.as_ref().unwrap(),
+            &client
+                .api()
+                .commands
+                .get("send-xml")
+                .unwrap()
+                .body
+                .as_ref()
+                .unwrap(),
             &params,
         )
         .unwrap();
 
-    assert_eq!(body_config.raw.as_ref().unwrap(), "<request><name>test-user</name></request>");
+    assert_eq!(
+        body_config.raw.as_ref().unwrap(),
+        "<request><name>test-user</name></request>"
+    );
 }
 
 #[test]
@@ -358,7 +407,14 @@ fn test_multipart_body_template_resolution() {
     let client = ycallr_core::YcallrClient::new(api).unwrap();
     let body_config = client
         .resolve_body(
-            &client.api().commands.get("upload").unwrap().body.as_ref().unwrap(),
+            &client
+                .api()
+                .commands
+                .get("upload")
+                .unwrap()
+                .body
+                .as_ref()
+                .unwrap(),
             &params,
         )
         .unwrap();
@@ -374,13 +430,25 @@ fn test_body_type_detection() {
 
     assert!(api.commands.get("no-body").unwrap().body.is_none());
 
-    let json_cmd = api.commands.get("json-only").unwrap().body.as_ref().unwrap();
+    let json_cmd = api
+        .commands
+        .get("json-only")
+        .unwrap()
+        .body
+        .as_ref()
+        .unwrap();
     assert!(json_cmd.json.is_some());
     assert!(json_cmd.form.is_none());
     assert!(json_cmd.raw.is_none());
     assert!(json_cmd.multipart.is_none());
 
-    let form_cmd = api.commands.get("form-only").unwrap().body.as_ref().unwrap();
+    let form_cmd = api
+        .commands
+        .get("form-only")
+        .unwrap()
+        .body
+        .as_ref()
+        .unwrap();
     assert!(form_cmd.json.is_none());
     assert!(form_cmd.form.is_some());
     assert!(form_cmd.raw.is_none());
@@ -392,7 +460,13 @@ fn test_body_type_detection() {
     assert!(raw_cmd.raw.is_some());
     assert!(raw_cmd.multipart.is_none());
 
-    let mp_cmd = api.commands.get("multipart-only").unwrap().body.as_ref().unwrap();
+    let mp_cmd = api
+        .commands
+        .get("multipart-only")
+        .unwrap()
+        .body
+        .as_ref()
+        .unwrap();
     assert!(mp_cmd.json.is_none());
     assert!(mp_cmd.form.is_none());
     assert!(mp_cmd.raw.is_none());
@@ -400,36 +474,31 @@ fn test_body_type_detection() {
 }
 
 #[test]
-fn test_multiple_body_types_in_one_config() {
-    let api = ycallr_core::yaml_parser::parse_yaml(MIXED_BODY_YAML).unwrap();
-    let body = api.commands.get("complex").unwrap().body.clone().unwrap();
-
-    assert!(body.json.is_some());
-    assert!(body.raw.is_some());
-
-    let mut params = HashMap::new();
-    params.insert("token".to_string(), "abc123".to_string());
-
-    let client = ycallr_core::YcallrClient::new(api).unwrap();
-    let resolved = client
-        .resolve_body(&body, &params)
-        .unwrap();
-
-    assert_eq!(resolved.json.as_ref().unwrap()["auth"], "abc123");
-    assert_eq!(resolved.raw.as_ref().unwrap(), "fallback abc123");
+fn test_multiple_body_types_in_one_config_rejected() {
+    let result = ycallr_core::yaml_parser::parse_yaml(MIXED_BODY_YAML);
+    assert!(result.is_err());
+    let err = result.unwrap_err().to_string();
+    assert!(err.contains("only one of json, form, raw, or multipart"));
+    assert!(err.contains("json"));
+    assert!(err.contains("raw"));
 }
 
 #[test]
-fn test_body_protobuf_roundtrip_preserves_all_types() {
-    let api = ycallr_core::yaml_parser::parse_yaml(MIXED_BODY_YAML).unwrap();
+fn test_body_protobuf_roundtrip_preserves_json_body() {
+    let api = ycallr_core::yaml_parser::parse_yaml(MIXED_BODY_YAML_JSON_ONLY).unwrap();
     let proto_bytes = api.to_proto_bytes().unwrap();
     let restored = ApiDefinition::from_proto_bytes(&proto_bytes).unwrap();
 
-    let body = restored.commands.get("complex").unwrap().body.as_ref().unwrap();
+    let body = restored
+        .commands
+        .get("complex")
+        .unwrap()
+        .body
+        .as_ref()
+        .unwrap();
     assert!(body.json.is_some());
     assert_eq!(body.json.as_ref().unwrap()["auth"], "{token}");
-    assert!(body.raw.is_some());
-    assert_eq!(body.raw.as_ref().unwrap(), "fallback {token}");
+    assert!(body.raw.is_none());
 }
 
 #[test]
@@ -440,17 +509,41 @@ fn test_empty_body_protobuf_roundtrip() {
 
     assert!(restored.commands.get("no-body").unwrap().body.is_none());
 
-    let json_cmd = restored.commands.get("json-only").unwrap().body.as_ref().unwrap();
+    let json_cmd = restored
+        .commands
+        .get("json-only")
+        .unwrap()
+        .body
+        .as_ref()
+        .unwrap();
     assert!(json_cmd.json.is_some());
     assert!(json_cmd.form.is_none());
 
-    let form_cmd = restored.commands.get("form-only").unwrap().body.as_ref().unwrap();
+    let form_cmd = restored
+        .commands
+        .get("form-only")
+        .unwrap()
+        .body
+        .as_ref()
+        .unwrap();
     assert!(form_cmd.form.is_some());
     assert!(form_cmd.json.is_none());
 
-    let raw_cmd = restored.commands.get("raw-only").unwrap().body.as_ref().unwrap();
+    let raw_cmd = restored
+        .commands
+        .get("raw-only")
+        .unwrap()
+        .body
+        .as_ref()
+        .unwrap();
     assert!(raw_cmd.raw.is_some());
 
-    let mp_cmd = restored.commands.get("multipart-only").unwrap().body.as_ref().unwrap();
+    let mp_cmd = restored
+        .commands
+        .get("multipart-only")
+        .unwrap()
+        .body
+        .as_ref()
+        .unwrap();
     assert!(mp_cmd.multipart.is_some());
 }
