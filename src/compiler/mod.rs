@@ -7,8 +7,8 @@ use prost::Message;
 use std::collections::HashMap;
 
 use conversions::{
-    auth_from_proto, auth_to_proto, command_from_proto, command_to_proto, env_from_proto,
-    env_to_proto,
+    api_error_config_from_proto, api_error_config_to_proto, auth_from_proto, auth_to_proto,
+    command_from_proto, command_to_proto, env_from_proto, env_to_proto,
 };
 
 pub struct Compiler;
@@ -33,6 +33,7 @@ impl Compiler {
                 .iter()
                 .map(|(k, v)| (k.clone(), auth_to_proto(v)))
                 .collect(),
+            errors: api.errors.as_ref().map(api_error_config_to_proto),
         };
 
         Ok(proto_api.encode_to_vec())
@@ -74,6 +75,7 @@ impl Compiler {
             env,
             auth,
             commands,
+            errors: proto_api.errors.as_ref().map(api_error_config_from_proto),
         })
     }
 }
@@ -142,6 +144,7 @@ mod tests {
             env: vec![],
             auth: HashMap::new(),
             commands,
+            errors: None,
         }
     }
 
@@ -207,6 +210,7 @@ mod tests {
             }],
             auth: HashMap::new(),
             commands,
+            errors: None,
         }
     }
 
@@ -251,6 +255,7 @@ mod tests {
             ],
             auth: HashMap::new(),
             commands,
+            errors: None,
         }
     }
 
@@ -307,6 +312,7 @@ mod tests {
             env: vec![],
             auth: HashMap::new(),
             commands,
+            errors: None,
         }
     }
 
@@ -498,6 +504,7 @@ mod tests {
             env: vec![],
             auth,
             commands,
+            errors: None,
         }
     }
 

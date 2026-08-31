@@ -3,7 +3,10 @@ use std::collections::HashMap;
 use percent_encoding::{utf8_percent_encode, AsciiSet, NON_ALPHANUMERIC};
 
 use crate::error::{Result, YcallrError};
-use crate::models::{ApiKeyLocation, AuthConfig, Command, HttpMethod, ResponseConfig};
+use crate::models::builtin_response_template;
+use crate::models::{
+    ApiErrorConfig, ApiKeyLocation, AuthConfig, Command, HttpMethod, ResponseConfig,
+};
 
 use super::context::ClientContext;
 use super::templates;
@@ -173,24 +176,41 @@ pub fn build_api_response(
     status: u16,
     headers: HashMap<String, String>,
     body_text: String,
-    responses: Option<&ResponseConfig>,
+    command_responses: Option<&ResponseConfig>,
+    api_errors: Option<&ApiErrorConfig>,
     params: &HashMap<String, String>,
 ) -> ApiResponse {
     let body_json: serde_json::Value =
         serde_json::from_str(&body_text).unwrap_or_else(|_| serde_json::Value::String(body_text));
 
-    let message = responses.and_then(|responses| {
-        responses
-            .get_entry_for_status(status)
-            .map(|entry| templates::resolve_response_template(&entry.message, params, &body_json))
-    });
+    let (template, use_input_params) =
+        resolve_response_template_source(status, command_responses, api_errors);
+    let message = if use_input_params {
+        templates::resolve_response_template(template, status, params, &body_json)
+    } else {
+        templates::resolve_response_template(template, status, &HashMap::new(), &body_json)
+    };
 
     ApiResponse {
         status,
         headers,
         body: body_json,
-        message,
+        message: Some(message),
     }
+}
+
+fn resolve_response_template_source<'a>(
+    status: u16,
+    command_responses: Option<&'a ResponseConfig>,
+    api_errors: Option<&'a ApiErrorConfig>,
+) -> (&'a str, bool) {
+    if let Some(entry) = command_responses.and_then(|r| r.get_entry_for_status(status)) {
+        return (entry.message.as_str(), true);
+    }
+    if let Some(entry) = api_errors.and_then(|e| e.get_entry_for_status(status)) {
+        return (entry.message.as_str(), false);
+    }
+    (builtin_response_template(status), false)
 }
 
 fn append_query_pairs(url: &str, pairs: &[(String, String)]) -> String {
@@ -521,6 +541,7 @@ mod tests {
                 env: vec![],
                 auth: HashMap::new(),
                 commands,
+                errors: None,
             },
             auth: None,
             auth_configs: HashMap::new(),
@@ -590,6 +611,7 @@ mod tests {
                 env: vec![],
                 auth: HashMap::new(),
                 commands,
+                errors: None,
             },
             auth: None,
             auth_configs: HashMap::new(),
@@ -630,6 +652,7 @@ mod tests {
                 env: vec![],
                 auth: HashMap::new(),
                 commands,
+                errors: None,
             },
             auth: Some(crate::models::AuthConfig::Http {
                 scheme: "Digest".to_string(),
@@ -646,6 +669,73 @@ mod tests {
         assert_eq!(
             prepared.headers.get("Authorization").map(String::as_str),
             Some("DIGEST secret")
+        );
+    }
+
+    #[test]
+    fn test_build_api_response_fallback_chain() {
+        use crate::models::{ApiErrorConfig, ResponseConfig, ResponseEntry};
+        use std::collections::HashMap;
+
+        let mut params = HashMap::new();
+        params.insert("owner".to_string(), "rust-lang".to_string());
+
+        let command_responses = ResponseConfig {
+            success: Some(ResponseEntry {
+                message: "Created".to_string(),
+            }),
+            failure: None,
+            warn: None,
+            codes: HashMap::new(),
+        };
+
+        let api_errors = ApiErrorConfig {
+            default: Some(ResponseEntry {
+                message: "API default {status}".to_string(),
+            }),
+            codes: HashMap::from([(
+                "404".to_string(),
+                ResponseEntry {
+                    message: "Resource not found".to_string(),
+                },
+            )]),
+        };
+
+        let with_command = build_api_response(
+            200,
+            HashMap::new(),
+            "{}".to_string(),
+            Some(&command_responses),
+            Some(&api_errors),
+            &params,
+        );
+        assert_eq!(with_command.message.as_deref(), Some("Created"));
+
+        let api_only = build_api_response(
+            404,
+            HashMap::new(),
+            "{}".to_string(),
+            None,
+            Some(&api_errors),
+            &params,
+        );
+        assert_eq!(api_only.message.as_deref(), Some("Resource not found"));
+
+        let builtin = build_api_response(
+            500,
+            HashMap::new(),
+            "{}".to_string(),
+            None,
+            Some(&api_errors),
+            &params,
+        );
+        assert_eq!(builtin.message.as_deref(), Some("API default 500"));
+
+        let core_default =
+            build_api_response(200, HashMap::new(), "{}".to_string(), None, None, &params);
+        assert_eq!(
+            core_default.message.as_deref(),
+            Some("Request succeeded (HTTP 200)")
         );
     }
 }

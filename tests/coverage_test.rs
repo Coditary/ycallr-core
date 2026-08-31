@@ -3,9 +3,50 @@
 use std::collections::HashMap;
 use tempfile::tempdir;
 use ycallr_core::{
-    client::EnvMode, ApiDefinition, BodyConfig, Command, HttpMethod, MultipartField, ParamType,
+    client::EnvMode, ApiDefinition, BodyConfig, Command, EnvVar, HttpMethod, MultipartField, ParamType,
     Parameter, YcallrClient,
 };
+
+#[test]
+fn test_builder_envs_map() {
+    let mut commands = HashMap::new();
+    commands.insert(
+        "ping".to_string(),
+        Command {
+            description: None,
+            endpoint: Some("/ping".to_string()),
+            method: Some(HttpMethod::GET),
+            auth: None,
+            headers: HashMap::new(),
+            params: HashMap::new(),
+            body: None,
+            responses: None,
+            commands: None,
+        },
+    );
+
+    let api = ApiDefinition {
+        name: "envs".to_string(),
+        version: "1".to_string(),
+        description: "".to_string(),
+        base_url: "http://127.0.0.1:9".to_string(),
+        env: vec![EnvVar {
+            name: "TOKEN".to_string(),
+            required: true,
+        }],
+        auth: HashMap::new(),
+        commands,
+        errors: None,
+    };
+
+    let vars = HashMap::from([("TOKEN".to_string(), "secret".to_string())]);
+    let ctx = YcallrClient::builder(api)
+        .env_mode(EnvMode::Manual)
+        .envs(vars)
+        .build_context()
+        .unwrap();
+    assert_eq!(ctx.env_vars.get("TOKEN").map(String::as_str), Some("secret"));
+}
 
 #[test]
 fn test_builder_build_context() {
@@ -33,6 +74,7 @@ fn test_builder_build_context() {
         env: vec![],
         auth: HashMap::new(),
         commands,
+        errors: None,
     };
 
     let ctx = YcallrClient::builder(api)
@@ -101,6 +143,7 @@ fn test_multipart_body_over_http() {
         env: vec![],
         auth: HashMap::new(),
         commands,
+        errors: None,
     };
 
     let client = YcallrClient::new(api).unwrap();
@@ -145,9 +188,13 @@ fn test_validate_params_on_client() {
         env: vec![],
         auth: HashMap::new(),
         commands,
+        errors: None,
     };
 
-    let client = YcallrClient::new(api).unwrap();
+    let client = YcallrClient::builder(api)
+        .env_mode(EnvMode::Manual)
+        .build()
+        .unwrap();
     let bad = HashMap::from([("id".to_string(), "not-a-number".to_string())]);
     let err = client.validate_params("get", &bad, None).unwrap_err();
     assert!(err.to_string().contains("number"));

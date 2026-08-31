@@ -470,6 +470,32 @@ pub extern "C" fn ycallr_get_description(api: *const YcallrApi) -> *const c_char
     unsafe { (*api).description }
 }
 
+/// Declared profile env vars as JSON: `[{"name":"TOKEN","required":true}]`
+#[no_mangle]
+pub extern "C" fn ycallr_get_env_json(api: *const YcallrApi) -> *mut c_char {
+    if api.is_null() {
+        return std::ptr::null_mut();
+    }
+    let inner = unsafe { &(*api)._inner };
+    let envs: Vec<serde_json::Value> = inner
+        .env
+        .iter()
+        .map(|e| {
+            serde_json::json!({
+                "name": e.name,
+                "required": e.required,
+            })
+        })
+        .collect();
+    match serde_json::to_string(&envs) {
+        Ok(json) => into_raw_cstring(json),
+        Err(e) => {
+            set_last_error(format!("Failed to serialize env list: {}", e));
+            std::ptr::null_mut()
+        }
+    }
+}
+
 /// Returns a JSON array of command names at the top level: `["repos","users"]`
 #[no_mangle]
 pub extern "C" fn ycallr_list_commands(api: *const YcallrApi) -> *mut c_char {
@@ -656,6 +682,7 @@ pub struct YcallrCommand {
     is_leaf: bool,
     is_branch: bool,
     has_body: bool,
+    body_kind: Option<String>,
     path_params: Vec<String>,
     auth: Option<String>,
     headers_json: String,
@@ -690,6 +717,11 @@ pub extern "C" fn ycallr_get_command(
     let headers_json = serde_json::to_string(&cmd.headers).unwrap_or_default();
     let params_json = serde_json::to_string(&cmd.params).unwrap_or_default();
 
+    let body_kind = cmd
+        .body
+        .as_ref()
+        .and_then(|b| b.active_body_kind().map(|k| k.to_string()));
+
     Box::into_raw(Box::new(YcallrCommand {
         endpoint: cmd.endpoint.clone(),
         method: cmd.method.as_ref().map(|m| m.as_str().to_string()),
@@ -697,6 +729,7 @@ pub extern "C" fn ycallr_get_command(
         is_leaf: cmd.is_leaf(),
         is_branch: cmd.is_branch(),
         has_body: cmd.body.is_some(),
+        body_kind,
         path_params: cmd.endpoint_path_param_names(),
         auth: cmd.auth.clone(),
         headers_json,
@@ -805,6 +838,20 @@ pub extern "C" fn ycallr_command_has_body(cmd: *const YcallrCommand) -> bool {
         return false;
     }
     unsafe { (*cmd).has_body }
+}
+
+/// Returns body kind: `json`, `form`, `raw`, or `multipart`. Caller frees with `ycallr_string_free`.
+#[no_mangle]
+pub extern "C" fn ycallr_command_get_body_kind(cmd: *const YcallrCommand) -> *mut c_char {
+    if cmd.is_null() {
+        return std::ptr::null_mut();
+    }
+    unsafe {
+        match &(*cmd).body_kind {
+            Some(k) => into_raw_cstring(k.clone()),
+            None => std::ptr::null_mut(),
+        }
+    }
 }
 
 /// Returns JSON array of path parameter names from the endpoint template.

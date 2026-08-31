@@ -83,6 +83,7 @@ pub fn call(
         headers,
         body_text,
         prepared.responses.as_ref(),
+        client.api.errors.as_ref(),
         &prepared.params,
     ))
 }

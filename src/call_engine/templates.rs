@@ -22,11 +22,13 @@ pub fn resolve_env_vars(text: &str, env_vars: &HashMap<String, String>) -> crate
 
 pub fn resolve_response_template(
     template: &str,
+    status: u16,
     params: &HashMap<String, String>,
     body: &serde_json::Value,
 ) -> String {
+    let mut result = template.replace("{status}", &status.to_string());
+
     let re = Regex::new(r"\{(input|output)\.([^}]+)\}").unwrap();
-    let mut result = template.to_string();
 
     for cap in re.captures_iter(template) {
         let full_match = cap.get(0).map(|m| m.as_str()).unwrap_or("");
@@ -207,7 +209,7 @@ mod tests {
         params.insert("owner".to_string(), "rust-lang".to_string());
         let body = serde_json::json!({});
 
-        let result = resolve_response_template("{input.owner} not found", &params, &body);
+        let result = resolve_response_template("{input.owner} not found", 404, &params, &body);
         assert_eq!(result, "rust-lang not found");
     }
 
@@ -218,6 +220,7 @@ mod tests {
 
         let result = resolve_response_template(
             "Got repo {output.name} with {output.stars} stars",
+            200,
             &params,
             &body,
         );
@@ -229,8 +232,12 @@ mod tests {
         let params = HashMap::new();
         let body = serde_json::json!({"name": "rust", "stars": 90000});
 
-        let result =
-            resolve_response_template("{output.stars} stars for {output.name}", &params, &body);
+        let result = resolve_response_template(
+            "{output.stars} stars for {output.name}",
+            200,
+            &params,
+            &body,
+        );
         assert_eq!(result, "90000 stars for rust");
     }
 
@@ -240,7 +247,7 @@ mod tests {
         params.insert("owner".to_string(), "rust-lang".to_string());
         let body = serde_json::json!({"name": "rust"});
 
-        let result = resolve_response_template("{input.owner}/{output.name}", &params, &body);
+        let result = resolve_response_template("{input.owner}/{output.name}", 200, &params, &body);
         assert_eq!(result, "rust-lang/rust");
     }
 
@@ -249,7 +256,7 @@ mod tests {
         let params = HashMap::new();
         let body = serde_json::json!({"name": "rust"});
 
-        let result = resolve_response_template("{output.missing}", &params, &body);
+        let result = resolve_response_template("{output.missing}", 200, &params, &body);
         assert_eq!(result, "{output.missing}");
     }
 
@@ -263,6 +270,7 @@ mod tests {
 
         let result = resolve_response_template(
             "User {output.user.name} (#{output.user.id})",
+            200,
             &params,
             &body,
         );
@@ -276,7 +284,7 @@ mod tests {
             "items": [{ "title": "first" }, { "title": "second" }]
         });
 
-        let result = resolve_response_template("{output.items.0.title}", &params, &body);
+        let result = resolve_response_template("{output.items.0.title}", 200, &params, &body);
         assert_eq!(result, "first");
     }
 
@@ -285,7 +293,7 @@ mod tests {
         let params = HashMap::new();
         let body = serde_json::json!({ "user": { "name": "rust" } });
 
-        let result = resolve_response_template("{output.user.email}", &params, &body);
+        let result = resolve_response_template("{output.user.email}", 200, &params, &body);
         assert_eq!(result, "{output.user.email}");
     }
 
@@ -339,7 +347,7 @@ mod tests {
     fn test_resolve_response_template_input_missing() {
         let params = HashMap::new();
         let body = serde_json::json!({"name": "rust"});
-        let result = resolve_response_template("Owner: {input.owner}", &params, &body);
+        let result = resolve_response_template("Owner: {input.owner}", 200, &params, &body);
         assert_eq!(result, "Owner: {input.owner}");
     }
 }

@@ -300,6 +300,7 @@ impl YcallrWasmClient {
                 fetch_result.headers,
                 fetch_result.body_text,
                 prepared.responses.as_ref(),
+                ctx.api.errors.as_ref(),
                 &prepared.params,
             );
 

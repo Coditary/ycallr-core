@@ -32,13 +32,24 @@ jobs:
       - uses: arduino/setup-protoc@v3
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - run: cargo test --all-features
-      - run: cargo test --features ffi --test ffi_test
+      - run: cargo test --all-features -- --test-threads 1
+      - run: cargo test --features ffi --test ffi_test -- --test-threads 1
+
+  coverage:
+    name: Coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: arduino/setup-protoc@v3
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo install cargo-tarpaulin --locked
+      - run: make coverage
 
   build-header:
     name: Generate C Header
     runs-on: ubuntu-latest
-    needs: [lint, test]
+    needs: [lint, test, coverage]
     steps:
       - uses: actions/checkout@v4
       - uses: arduino/setup-protoc@v3
@@ -57,7 +68,7 @@ jobs:
     name: Release
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [lint, test, build-header]
+    needs: [lint, test, coverage, build-header]
     permissions:
       contents: write
     steps:
@@ -69,4 +80,9 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
+          body: |
+            ycallr-core library release.
+
+            - `ycallr.h` — C FFI header (cbindgen)
+            - CLI binaries and ReqPack packages: [ycallr-cli releases](https://github.com/Coditary/ycallr-cli/releases)
           files: ycallr.h

@@ -3,7 +3,8 @@ use std::collections::HashMap;
 use crate::YcallrError;
 
 use super::command::command_auth_is_none;
-use super::{ApiDefinition, AuthConfig, BodyConfig, Command};
+use super::{ApiDefinition, ApiErrorConfig, AuthConfig, BodyConfig, Command};
+use crate::models::api_error_template_references_input;
 
 /// Full validation for YAML/proto ingestion (includes blocked-host checks).
 pub fn validate_api(api: &ApiDefinition) -> crate::Result<()> {
@@ -39,6 +40,10 @@ fn validate_api_inner(api: &ApiDefinition, block_sensitive_hosts: bool) -> crate
     }
 
     validate_env_vars(&api.env)?;
+
+    if let Some(errors) = &api.errors {
+        validate_api_errors(errors)?;
+    }
 
     for (name, cmd) in &api.commands {
         validate_command(name, cmd, &api.auth)?;
@@ -178,6 +183,38 @@ fn validate_command(
         }
     }
 
+    Ok(())
+}
+
+fn validate_api_errors(errors: &ApiErrorConfig) -> crate::Result<()> {
+    if let Some(default) = &errors.default {
+        validate_api_error_entry("default", &default.message)?;
+    }
+    for (code, entry) in &errors.codes {
+        if code.parse::<u16>().is_err() {
+            return Err(YcallrError::InvalidDefinition(format!(
+                "errors: invalid status code '{}'",
+                code
+            )));
+        }
+        validate_api_error_entry(code, &entry.message)?;
+    }
+    Ok(())
+}
+
+fn validate_api_error_entry(label: &str, message: &str) -> crate::Result<()> {
+    if message.trim().is_empty() {
+        return Err(YcallrError::InvalidDefinition(format!(
+            "errors.{}.message cannot be empty",
+            label
+        )));
+    }
+    if api_error_template_references_input(message) {
+        return Err(YcallrError::InvalidDefinition(format!(
+            "errors.{}: API error templates cannot use {{input.*}} placeholders",
+            label
+        )));
+    }
     Ok(())
 }
 
@@ -379,6 +416,7 @@ mod tests {
             env: vec![],
             auth: HashMap::new(),
             commands: HashMap::new(),
+            errors: None,
         };
         assert!(validate_api_for_client(&api).is_ok());
         assert!(validate_api(&api).is_err());
@@ -410,6 +448,7 @@ mod tests {
             env: vec![],
             auth: HashMap::new(),
             commands,
+            errors: None,
         };
 
         assert!(validate_api(&api).is_ok());
@@ -441,6 +480,7 @@ mod tests {
             env: vec![],
             auth: HashMap::new(),
             commands,
+            errors: None,
         };
 
         assert!(validate_api(&api).is_err());
@@ -472,6 +512,7 @@ mod tests {
             env: vec![],
             auth: HashMap::new(),
             commands,
+            errors: None,
         };
 
         let err = validate_api(&api).unwrap_err().to_string();
@@ -573,6 +614,7 @@ mod tests {
             ],
             auth: HashMap::new(),
             commands: HashMap::new(),
+            errors: None,
         };
         assert!(validate_api(&api).is_err());
     }

@@ -33,5 +33,8 @@ mod proto {
 pub use error::{Result, YcallrError};
 pub use models::*;
 
+/// Crate version (matches `Cargo.toml`).
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
 #[cfg(feature = "client")]
 pub use client::{ApiError, ApiResponse, YcallrClient};

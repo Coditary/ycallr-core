@@ -198,6 +198,7 @@ mod tests {
             env: vec![],
             auth: HashMap::new(),
             commands,
+            errors: None,
         }
     }
 
@@ -263,6 +264,7 @@ mod tests {
             env: vec![],
             auth: HashMap::new(),
             commands,
+            errors: None,
         }
     }
 
@@ -339,6 +341,7 @@ mod tests {
             env: vec![],
             auth: HashMap::new(),
             commands,
+            errors: None,
         }
     }
 
@@ -377,6 +380,7 @@ mod tests {
             }],
             auth: HashMap::new(),
             commands,
+            errors: None,
         }
     }
 
@@ -686,6 +690,7 @@ mod tests {
             env: vec![],
             auth: HashMap::new(),
             commands,
+            errors: None,
         };
 
         let result = YcallrClient::new(api);
@@ -778,6 +783,7 @@ mod client_integration_tests {
             env: vec![],
             auth: HashMap::new(),
             commands,
+            errors: None,
         }
     }
 

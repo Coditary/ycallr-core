@@ -6,6 +6,7 @@ mod validation;
 
 pub use command::{command_auth_is_none, COMMAND_AUTH_NONE};
 pub use command_details::CommandDetails;
+pub use response::{api_error_template_references_input, builtin_response_template};
 pub use types::*;
 
 impl ApiDefinition {
@@ -97,6 +98,7 @@ mod tests {
             env: vec![],
             auth: HashMap::new(),
             commands,
+            errors: None,
         }
     }
 
@@ -176,6 +178,7 @@ mod tests {
             }],
             auth: HashMap::new(),
             commands,
+            errors: None,
         }
     }
 
@@ -515,6 +518,51 @@ commands:
     }
 
     #[test]
+    fn test_api_errors_config_parsing() {
+        let yaml = r#"
+name: test
+version: "1.0.0"
+base_url: https://api.test.com
+errors:
+  default: "API error {status}"
+  404: "Resource not found"
+commands:
+  get:
+    endpoint: /items
+    method: GET
+"#;
+        let api = crate::yaml_parser::parse_yaml(yaml).unwrap();
+        let errors = api.errors.as_ref().unwrap();
+        assert_eq!(
+            errors.default.as_ref().unwrap().message,
+            "API error {status}"
+        );
+        assert_eq!(
+            errors.codes.get("404").unwrap().message,
+            "Resource not found"
+        );
+    }
+
+    #[test]
+    fn test_api_errors_reject_input_placeholders() {
+        let yaml = r#"
+name: test
+version: "1.0.0"
+base_url: https://api.test.com
+errors:
+  404: "{input.owner} not found"
+commands:
+  get:
+    endpoint: /items
+    method: GET
+"#;
+        let err = crate::yaml_parser::parse_yaml(yaml)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("cannot use {input.*}"));
+    }
+
+    #[test]
     fn test_response_config_parsing() {
         let yaml = r#"
 name: test
@@ -525,12 +573,9 @@ commands:
     endpoint: /items
     method: POST
     responses:
-      success:
-        message: "Created {output.title}"
-      failure:
-        message: "Failed to create"
-      404:
-        message: "{input.owner} not found"
+      success: "Created {output.title}"
+      failure: "Failed to create"
+      404: "{input.owner} not found"
 "#;
         let api = crate::yaml_parser::parse_yaml(yaml).unwrap();
         let cmd = api.commands.get("create").unwrap();

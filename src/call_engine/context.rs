@@ -113,6 +113,7 @@ mod tests {
             }],
             auth: HashMap::new(),
             commands: HashMap::new(),
+            errors: None,
         };
 
         let resolved = resolve_client_env(&api, &EnvMode::Auto, &HashMap::new()).unwrap();
@@ -137,6 +138,7 @@ mod tests {
             }],
             auth: HashMap::new(),
             commands: HashMap::new(),
+            errors: None,
         };
 
         let manual = HashMap::from([(key.to_string(), "manual".to_string())]);

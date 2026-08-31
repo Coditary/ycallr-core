@@ -62,6 +62,11 @@ const char *ycallr_get_base_url(const struct YcallrApi *api);
 const char *ycallr_get_description(const struct YcallrApi *api);
 
 /**
+ * Declared profile env vars as JSON: `[{"name":"TOKEN","required":true}]`
+ */
+char *ycallr_get_env_json(const struct YcallrApi *api);
+
+/**
  * Returns a JSON array of command names at the top level: `["repos","users"]`
  */
 char *ycallr_list_commands(const struct YcallrApi *api);
@@ -121,6 +126,11 @@ bool ycallr_command_is_leaf(const struct YcallrCommand *cmd);
 bool ycallr_command_is_branch(const struct YcallrCommand *cmd);
 
 bool ycallr_command_has_body(const struct YcallrCommand *cmd);
+
+/**
+ * Returns body kind: `json`, `form`, `raw`, or `multipart`. Caller frees with `ycallr_string_free`.
+ */
+char *ycallr_command_get_body_kind(const struct YcallrCommand *cmd);
 
 /**
  * Returns JSON array of path parameter names from the endpoint template.

@@ -13,6 +13,12 @@ message ApiDefinition {
   map<string, Command> commands = 5;
   repeated EnvVar env = 6;
   map<string, AuthConfig> auth = 7;
+  optional ApiErrorConfig errors = 8;
+}
+
+message ApiErrorConfig {
+  optional ResponseEntry default_entry = 1;
+  map<string, ResponseEntry> codes = 2;
 }
 
 message Command {

@@ -97,6 +97,7 @@ fn create_test_api(base_url: &str) -> ApiDefinition {
         env: vec![],
         auth: HashMap::new(),
         commands,
+        errors: None,
     }
 }
 
@@ -160,6 +161,7 @@ fn create_nested_test_api(base_url: &str) -> ApiDefinition {
         env: vec![],
         auth: HashMap::new(),
         commands,
+        errors: None,
     }
 }
 
@@ -219,6 +221,7 @@ fn create_env_test_api(base_url: &str) -> ApiDefinition {
         }],
         auth: HashMap::new(),
         commands,
+        errors: None,
     }
 }
 
@@ -360,6 +363,7 @@ fn test_named_auth_bearer_from_yaml() {
         env: vec![],
         auth: auth_map,
         commands,
+        errors: None,
     };
 
     let client = YcallrClient::new(api).unwrap();
@@ -434,6 +438,7 @@ fn test_named_auth_api_key_from_yaml() {
         env: vec![],
         auth: auth_map,
         commands,
+        errors: None,
     };
 
     let client = YcallrClient::new(api).unwrap();
@@ -507,6 +512,7 @@ fn test_command_without_auth_uses_none() {
         env: vec![],
         auth: auth_map,
         commands,
+        errors: None,
     };
 
     let client = YcallrClient::new(api).unwrap();
@@ -542,6 +548,7 @@ fn test_get_named_auth_config() {
         env: vec![],
         auth: auth_map,
         commands,
+        errors: None,
     };
 
     let client = YcallrClient::new(api).unwrap();
@@ -642,6 +649,7 @@ fn test_get_query_params_appended() {
         env: vec![],
         auth: HashMap::new(),
         commands,
+        errors: None,
     };
 
     let client = YcallrClient::new(api).unwrap();
@@ -706,6 +714,7 @@ fn test_query_auth_preserves_headers() {
         env: vec![],
         auth: auth_map,
         commands,
+        errors: None,
     };
 
     let client = YcallrClient::new(api).unwrap();
@@ -741,6 +750,7 @@ fn test_missing_named_auth_errors() {
         env: vec![],
         auth: HashMap::new(),
         commands,
+        errors: None,
     };
 
     let result = YcallrClient::new(api);
@@ -798,6 +808,7 @@ fn test_invalid_param_type_errors() {
         env: vec![],
         auth: HashMap::new(),
         commands,
+        errors: None,
     };
 
     let client = YcallrClient::new(api).unwrap();
@@ -927,6 +938,7 @@ fn test_query_params_are_url_encoded() {
         env: vec![],
         auth: HashMap::new(),
         commands,
+        errors: None,
     };
 
     let client = YcallrClient::new(api).unwrap();
@@ -1083,6 +1095,7 @@ fn test_branch_only_command_call_fails() {
         env: vec![],
         auth: HashMap::new(),
         commands,
+        errors: None,
     };
 
     let client = YcallrClient::new(api).unwrap();
@@ -1358,6 +1371,7 @@ fn test_cookie_auth_over_http() {
         env: vec![],
         auth,
         commands,
+        errors: None,
     };
 
     let client = YcallrClient::new(api).unwrap();
@@ -1494,6 +1508,7 @@ fn test_response_warn_status_message() {
         env: vec![],
         auth: HashMap::new(),
         commands,
+        errors: None,
     };
 
     let client = YcallrClient::new(api).unwrap();
@@ -1596,6 +1611,7 @@ fn test_base_url_trailing_slash_join() {
                 responses: None,
             },
         )]),
+        errors: None,
     };
 
     let client = YcallrClient::new(api).unwrap();
@@ -1666,6 +1682,7 @@ fn test_unresolved_bearer_env_token_errors() {
         }],
         auth,
         commands,
+        errors: None,
     };
 
     let result = YcallrClient::builder(api)
@@ -1711,6 +1728,7 @@ fn test_global_auth_skipped_when_command_auth_none() {
         env: vec![],
         auth: HashMap::new(),
         commands,
+        errors: None,
     };
 
     let client = YcallrClient::with_auth(
@@ -1903,6 +1921,7 @@ fn test_redirects_are_not_followed() {
         env: vec![],
         auth: HashMap::new(),
         commands,
+        errors: None,
     };
 
     let client = YcallrClient::new(api).unwrap();
@@ -1937,6 +1956,7 @@ fn test_cookie_auth_rejects_injection_chars() {
                 responses: None,
             },
         )]),
+        errors: None,
     };
 
     let client = YcallrClient::with_auth(
@@ -2005,6 +2025,7 @@ fn test_duplicate_query_param_from_auth_and_params_errors() {
         env: vec![],
         auth,
         commands,
+        errors: None,
     };
 
     let client = YcallrClient::new(api).unwrap();
@@ -2059,6 +2080,7 @@ fn create_method_api(
         env: vec![],
         auth: HashMap::new(),
         commands,
+        errors: None,
     }
 }
 
@@ -2090,6 +2112,7 @@ fn create_http_auth_api(base_url: &str, auth_config: AuthConfig) -> ApiDefinitio
         env: vec![],
         auth,
         commands,
+        errors: None,
     }
 }
 
@@ -2137,5 +2160,6 @@ fn create_api_with_responses(base_url: &str) -> ApiDefinition {
         env: vec![],
         auth: HashMap::new(),
         commands,
+        errors: None,
     }
 }

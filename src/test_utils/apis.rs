@@ -148,6 +148,7 @@ pub fn github_api() -> ApiDefinition {
         env: vec![],
         auth: HashMap::new(),
         commands,
+        errors: None,
     }
 }
 
@@ -205,6 +206,7 @@ pub fn simple_api() -> ApiDefinition {
         env: vec![],
         auth: HashMap::new(),
         commands,
+        errors: None,
     }
 }
 
@@ -330,6 +332,7 @@ pub fn nested_github_api() -> ApiDefinition {
         }],
         auth: HashMap::new(),
         commands,
+        errors: None,
     }
 }
 
@@ -378,6 +381,7 @@ pub fn env_api() -> ApiDefinition {
         ],
         auth: HashMap::new(),
         commands,
+        errors: None,
     }
 }
 
@@ -425,5 +429,6 @@ pub fn response_api() -> ApiDefinition {
         env: vec![],
         auth: HashMap::new(),
         commands,
+        errors: None,
     }
 }

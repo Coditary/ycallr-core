@@ -11,6 +11,7 @@ fn test_api_validation() {
         env: vec![],
         auth: HashMap::new(),
         commands: HashMap::new(),
+        errors: None,
     };
     assert!(valid_api.validate().is_ok());
 
@@ -22,6 +23,7 @@ fn test_api_validation() {
         env: vec![],
         auth: HashMap::new(),
         commands: HashMap::new(),
+        errors: None,
     };
     assert!(invalid_api.validate().is_err());
 }
@@ -266,6 +268,7 @@ fn test_validate_rejects_loopback_base_url() {
         env: vec![],
         auth: HashMap::new(),
         commands: HashMap::new(),
+        errors: None,
     };
     assert!(api.validate().is_err());
 }
@@ -280,6 +283,7 @@ fn test_validate_rejects_non_http_scheme() {
         env: vec![],
         auth: HashMap::new(),
         commands: HashMap::new(),
+        errors: None,
     };
     assert!(api.validate().is_err());
 }

@@ -1,7 +1,7 @@
 use crate::error::{Result, YcallrError};
 use crate::models::{
-    ApiKeyLocation, AuthConfig, BodyConfig, Command, EnvVar, HttpMethod, ParamType, Parameter,
-    ResponseConfig, ResponseEntry,
+    ApiErrorConfig, ApiKeyLocation, AuthConfig, BodyConfig, Command, EnvVar, HttpMethod, ParamType,
+    Parameter, ResponseConfig, ResponseEntry,
 };
 use crate::proto;
 
@@ -96,6 +96,28 @@ fn response_entry_to_proto(entry: &ResponseEntry) -> proto::ResponseEntry {
 fn response_entry_from_proto(entry: &proto::ResponseEntry) -> ResponseEntry {
     ResponseEntry {
         message: entry.message.clone(),
+    }
+}
+
+pub fn api_error_config_to_proto(config: &ApiErrorConfig) -> proto::ApiErrorConfig {
+    proto::ApiErrorConfig {
+        default_entry: config.default.as_ref().map(response_entry_to_proto),
+        codes: config
+            .codes
+            .iter()
+            .map(|(k, v)| (k.clone(), response_entry_to_proto(v)))
+            .collect(),
+    }
+}
+
+pub fn api_error_config_from_proto(config: &proto::ApiErrorConfig) -> ApiErrorConfig {
+    ApiErrorConfig {
+        default: config.default_entry.as_ref().map(response_entry_from_proto),
+        codes: config
+            .codes
+            .iter()
+            .map(|(k, v)| (k.clone(), response_entry_from_proto(v)))
+            .collect(),
     }
 }
 

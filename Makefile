@@ -20,10 +20,10 @@ test-wasm:
 test-all: test test-wasm
 
 coverage:
-	cargo tarpaulin --all-features --exclude-files src/wasm.rs
+	cargo tarpaulin --all-features --exclude-files src/wasm.rs --fail-under 85 -- --test-threads 1
 
 coverage-html:
-	cargo tarpaulin --all-features --exclude-files src/wasm.rs --html
+	cargo tarpaulin --all-features --exclude-files src/wasm.rs --fail-under 85 --html -- --test-threads 1
 
 lint:
 	cargo clippy --all-features

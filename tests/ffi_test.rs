@@ -1,20 +1,22 @@
 #![cfg(all(not(target_arch = "wasm32"), feature = "ffi"))]
 
 use std::ffi::{CStr, CString};
+use std::path::Path;
 use std::ptr;
+use std::sync::Mutex;
 use ycallr_core::ffi::{
     ycallr_build_implicit_body_json, ycallr_call, ycallr_client_free, ycallr_client_new,
-    ycallr_client_new_with_auth, ycallr_command_get_auth, ycallr_command_get_description,
-    ycallr_command_get_endpoint, ycallr_command_get_headers_json, ycallr_command_get_method,
-    ycallr_command_get_params_json, ycallr_command_get_path_params_json, ycallr_command_has_body,
-    ycallr_command_is_branch, ycallr_command_is_leaf, ycallr_free_api, ycallr_free_command,
-    ycallr_free_response, ycallr_get_base_url, ycallr_get_command, ycallr_get_description,
+    ycallr_client_new_with_auth, ycallr_command_get_auth, ycallr_command_get_body_kind,
+    ycallr_command_get_description, ycallr_command_get_endpoint, ycallr_command_get_headers_json,
+    ycallr_command_get_method, ycallr_command_get_params_json, ycallr_command_get_path_params_json,
+    ycallr_command_has_body, ycallr_command_is_branch, ycallr_command_is_leaf,
+    ycallr_compiled_profile_path, ycallr_free_api, ycallr_free_command, ycallr_free_response,
+    ycallr_get_base_url, ycallr_get_command, ycallr_get_description, ycallr_get_env_json,
     ycallr_get_last_error, ycallr_get_last_install_result, ycallr_get_name, ycallr_get_version,
     ycallr_install, ycallr_install_yaml_file, ycallr_list_commands, ycallr_list_installed,
     ycallr_list_subcommands, ycallr_load_installed, ycallr_missing_params_json, ycallr_parse_proto,
     ycallr_parse_yaml, ycallr_response_get_body_json, ycallr_response_get_headers_json,
-    ycallr_response_get_message, ycallr_response_get_status, ycallr_set_base_url,
-    ycallr_string_free,
+    ycallr_response_get_message, ycallr_response_get_status, ycallr_set_base_url, ycallr_string_free,
 };
 
 const VALID_YAML: &str = r#"
@@ -53,6 +55,15 @@ commands:
             method: GET
             description: List issues
 "#;
+
+static HOME_LOCK: Mutex<()> = Mutex::new(());
+
+fn with_home<F: FnOnce()>(home: &Path, f: F) {
+    let _guard = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    std::env::set_var("HOME", home);
+    f();
+    std::env::remove_var("HOME");
+}
 
 fn cstr(s: &str) -> *const std::os::raw::c_char {
     CString::new(s).unwrap().into_raw() as *const std::os::raw::c_char
@@ -846,30 +857,169 @@ commands:
     )
     .unwrap();
 
-    std::env::set_var("HOME", dir.path());
+    with_home(dir.path(), || {
+        let name = CString::new("ffi-demo").unwrap();
+        let rc = unsafe { ycallr_install(name.as_ptr()) };
+        assert_eq!(rc, 0);
 
-    let name = CString::new("ffi-demo").unwrap();
-    let rc = unsafe { ycallr_install(name.as_ptr()) };
-    assert_eq!(rc, 0);
+        let list = unsafe { ycallr_list_installed() };
+        assert!(!list.is_null());
+        let json = unsafe { CStr::from_ptr(list).to_str().unwrap() };
+        assert!(json.contains("ffi-demo"));
+        ycallr_string_free(list);
 
-    let api = unsafe { ycallr_load_installed(name.as_ptr()) };
+        let install_result = unsafe { ycallr_get_last_install_result() };
+        assert!(!install_result.is_null());
+        let install_json = unsafe { CStr::from_ptr(install_result).to_str().unwrap() };
+        assert!(install_json.contains("ffi-demo"));
+        assert!(install_json.contains("pb_path"));
+        ycallr_string_free(install_result);
+
+        let path_ptr = unsafe { ycallr_compiled_profile_path(name.as_ptr()) };
+        assert!(!path_ptr.is_null());
+        let pb_path = unsafe { CStr::from_ptr(path_ptr).to_str().unwrap() };
+        assert!(pb_path.ends_with("ffi-demo.pb"));
+        ycallr_string_free(path_ptr);
+
+        let api = unsafe { ycallr_load_installed(name.as_ptr()) };
+        assert!(!api.is_null());
+
+        unsafe {
+            let desc = ycallr_get_description(api);
+            assert!(!desc.is_null());
+            assert_eq!(
+                std::ffi::CStr::from_ptr(desc).to_str().unwrap(),
+                "FFI install test"
+            );
+            ycallr_free_api(api);
+        }
+
+        let path = CString::new(yaml_path.to_str().unwrap()).unwrap();
+        let rc = unsafe { ycallr_install_yaml_file(path.as_ptr()) };
+        assert_eq!(rc, 0);
+    });
+}
+
+#[test]
+fn test_ffi_list_subcommands_and_param_helpers() {
+    let yaml = CString::new(VALID_YAML).unwrap();
+    let api = unsafe { ycallr_parse_yaml(yaml.as_ptr()) };
     assert!(!api.is_null());
 
+    let empty = CString::new("").unwrap();
+    let top = unsafe { ycallr_list_subcommands(api, empty.as_ptr()) };
+    assert!(!top.is_null());
+    let top_json = unsafe { CStr::from_ptr(top).to_str().unwrap() };
+    assert!(top_json.contains("get-repo"));
+    assert!(top_json.contains("repos"));
+    ycallr_string_free(top);
+
+    let repos_path = CString::new("repos").unwrap();
+    let nested = unsafe { ycallr_list_subcommands(api, repos_path.as_ptr()) };
+    assert!(!nested.is_null());
+    let nested_json = unsafe { CStr::from_ptr(nested).to_str().unwrap() };
+    assert!(nested_json.contains("issues"));
+    ycallr_string_free(nested);
+
+    let env_ptr = unsafe { ycallr_get_env_json(api) };
+    assert!(!env_ptr.is_null());
+    ycallr_string_free(env_ptr);
+
+    let cmd_path = CString::new("get-repo").unwrap();
+    let missing_params = CString::new(r#"{"owner":"rust-lang"}"#).unwrap();
+    let missing = unsafe {
+        ycallr_missing_params_json(api, cmd_path.as_ptr(), missing_params.as_ptr())
+    };
+    assert!(!missing.is_null());
+    let missing_json = unsafe { CStr::from_ptr(missing).to_str().unwrap() };
+    assert!(missing_json.contains("repo"));
+    ycallr_string_free(missing);
+
+    let create_path = CString::new("repos.issues.create").unwrap();
+    let create_params = CString::new(r#"{"owner":"o","repo":"r","title":"t"}"#).unwrap();
+    let body_ptr = unsafe {
+        ycallr_build_implicit_body_json(api, create_path.as_ptr(), create_params.as_ptr())
+    };
+    assert!(!body_ptr.is_null());
+    let body_json = unsafe { CStr::from_ptr(body_ptr).to_str().unwrap() };
+    assert!(body_json.contains("title"));
+    ycallr_string_free(body_ptr);
+
+    let cmd = unsafe { ycallr_get_command(api, cmd_path.as_ptr()) };
+    assert!(!cmd.is_null());
     unsafe {
-        let desc = ycallr_get_description(api);
+        let desc = ycallr_command_get_description(cmd);
         assert!(!desc.is_null());
         assert_eq!(
-            std::ffi::CStr::from_ptr(desc).to_str().unwrap(),
-            "FFI install test"
+            CStr::from_ptr(desc).to_str().unwrap(),
+            "Get a repository"
         );
+        ycallr_string_free(desc);
+
+        let kind = ycallr_command_get_body_kind(cmd);
+        assert!(kind.is_null());
+
+        ycallr_free_command(cmd);
         ycallr_free_api(api);
     }
+}
 
-    let path = CString::new(yaml_path.to_str().unwrap()).unwrap();
-    let rc = unsafe { ycallr_install_yaml_file(path.as_ptr()) };
-    assert_eq!(rc, 0);
+#[test]
+fn test_ffi_system_install_and_call_with_mock() {
+    let dir = tempfile::tempdir().unwrap();
+    let apis = dir.path().join(".config").join("ycallr").join("apis");
+    std::fs::create_dir_all(&apis).unwrap();
+    let yaml_path = apis.join("ffi-sys.yaml");
+    std::fs::write(
+        &yaml_path,
+        r#"
+name: ffi-sys
+version: "1"
+base_url: https://api.test.invalid
+commands:
+  ping:
+    endpoint: /ping
+    method: GET
+"#,
+    )
+    .unwrap();
 
-    std::env::remove_var("HOME");
+    with_home(dir.path(), || {
+        let path = CString::new(yaml_path.to_str().unwrap()).unwrap();
+        assert_eq!(unsafe { ycallr_install_yaml_file(path.as_ptr()) }, 0);
+
+        let mut server = mockito::Server::new();
+        let mock = server
+            .mock("GET", "/ping")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"alive":true}"#)
+            .create();
+
+        let name = CString::new("ffi-sys").unwrap();
+        let api = unsafe { ycallr_load_installed(name.as_ptr()) };
+        assert!(!api.is_null());
+
+        let server_url = CString::new(server.url()).unwrap();
+        assert_eq!(unsafe { ycallr_set_base_url(api, server_url.as_ptr()) }, 0);
+
+        let client = unsafe { ycallr_client_new(api, 0, ptr::null()) };
+        assert!(!client.is_null());
+
+        let command = CString::new("ping").unwrap();
+        let params = CString::new("{}").unwrap();
+        let resp = unsafe { ycallr_call(client, command.as_ptr(), params.as_ptr(), ptr::null()) };
+        assert!(!resp.is_null());
+        assert_eq!(unsafe { ycallr_response_get_status(resp) }, 200);
+
+        mock.assert();
+
+        unsafe {
+            ycallr_free_response(resp);
+            ycallr_client_free(client);
+            ycallr_free_api(api);
+        }
+    });
 }
 
 #[test]

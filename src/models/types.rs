@@ -82,7 +82,7 @@ impl AuthConfig {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct ApiDefinition {
     pub name: String,
     pub version: String,
@@ -94,6 +94,8 @@ pub struct ApiDefinition {
     #[serde(default)]
     pub auth: HashMap<String, AuthConfig>,
     pub commands: HashMap<String, Command>,
+    #[serde(default)]
+    pub errors: Option<ApiErrorConfig>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -222,7 +224,16 @@ pub struct ResponseConfig {
     pub codes: HashMap<String, ResponseEntry>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+/// API-root default error message templates (`errors:` in YAML).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct ApiErrorConfig {
+    #[serde(default)]
+    pub default: Option<ResponseEntry>,
+    #[serde(flatten)]
+    pub codes: HashMap<String, ResponseEntry>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct ResponseEntry {
     pub message: String,
 }
