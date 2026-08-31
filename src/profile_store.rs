@@ -252,8 +252,11 @@ mod tests {
 
             let apis = apis_dir();
             std::fs::create_dir_all(&apis).unwrap();
-            std::fs::write(apis.join("hint.yaml"), "name: hint\nversion: \"1\"\nbase_url: http://x\ncommands: {}")
-                .unwrap();
+            std::fs::write(
+                apis.join("hint.yaml"),
+                "name: hint\nversion: \"1\"\nbase_url: http://x\ncommands: {}",
+            )
+            .unwrap();
             // name mismatch — still generic hint without yaml path for wrong name
             let msg2 = not_installed_message("other");
             assert!(msg2.contains("<path/to/profile.yaml>"));
@@ -265,8 +268,11 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let apis = dir.path().join(".config").join("ycallr").join("apis");
         std::fs::create_dir_all(&apis).unwrap();
-        std::fs::write(apis.join("demo.yaml"), "name: demo\nversion: \"1\"\nbase_url: http://x\ncommands: {}")
-            .unwrap();
+        std::fs::write(
+            apis.join("demo.yaml"),
+            "name: demo\nversion: \"1\"\nbase_url: http://x\ncommands: {}",
+        )
+        .unwrap();
 
         with_home(dir.path(), || {
             let msg = not_installed_message("demo");
@@ -339,7 +345,11 @@ commands:
     fn test_resolve_yaml_source_path_yml_extension() {
         let dir = tempfile::tempdir().unwrap();
         let yml = dir.path().join("profile.yml");
-        std::fs::write(&yml, "name: x\nversion: \"1\"\nbase_url: http://x\ncommands: {}").unwrap();
+        std::fs::write(
+            &yml,
+            "name: x\nversion: \"1\"\nbase_url: http://x\ncommands: {}",
+        )
+        .unwrap();
         let stem = dir.path().join("profile");
         let resolved = resolve_yaml_source_path(&stem).unwrap();
         assert_eq!(resolved, yml);
@@ -427,7 +437,11 @@ commands:
     fn test_resolve_yaml_source_path_without_extension() {
         let dir = tempfile::tempdir().unwrap();
         let yaml = dir.path().join("profile.yaml");
-        std::fs::write(&yaml, "name: x\nversion: \"1\"\nbase_url: http://x\ncommands: {}").unwrap();
+        std::fs::write(
+            &yaml,
+            "name: x\nversion: \"1\"\nbase_url: http://x\ncommands: {}",
+        )
+        .unwrap();
         let stem = dir.path().join("profile");
         let resolved = resolve_yaml_source_path(&stem).unwrap();
         assert_eq!(resolved, yaml);

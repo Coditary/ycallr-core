@@ -16,7 +16,8 @@ use ycallr_core::ffi::{
     ycallr_install, ycallr_install_yaml_file, ycallr_list_commands, ycallr_list_installed,
     ycallr_list_subcommands, ycallr_load_installed, ycallr_missing_params_json, ycallr_parse_proto,
     ycallr_parse_yaml, ycallr_response_get_body_json, ycallr_response_get_headers_json,
-    ycallr_response_get_message, ycallr_response_get_status, ycallr_set_base_url, ycallr_string_free,
+    ycallr_response_get_message, ycallr_response_get_status, ycallr_set_base_url,
+    ycallr_string_free,
 };
 
 const VALID_YAML: &str = r#"
@@ -927,9 +928,8 @@ fn test_ffi_list_subcommands_and_param_helpers() {
 
     let cmd_path = CString::new("get-repo").unwrap();
     let missing_params = CString::new(r#"{"owner":"rust-lang"}"#).unwrap();
-    let missing = unsafe {
-        ycallr_missing_params_json(api, cmd_path.as_ptr(), missing_params.as_ptr())
-    };
+    let missing =
+        unsafe { ycallr_missing_params_json(api, cmd_path.as_ptr(), missing_params.as_ptr()) };
     assert!(!missing.is_null());
     let missing_json = unsafe { CStr::from_ptr(missing).to_str().unwrap() };
     assert!(missing_json.contains("repo"));
@@ -950,10 +950,7 @@ fn test_ffi_list_subcommands_and_param_helpers() {
     unsafe {
         let desc = ycallr_command_get_description(cmd);
         assert!(!desc.is_null());
-        assert_eq!(
-            CStr::from_ptr(desc).to_str().unwrap(),
-            "Get a repository"
-        );
+        assert_eq!(CStr::from_ptr(desc).to_str().unwrap(), "Get a repository");
         ycallr_string_free(desc);
 
         let kind = ycallr_command_get_body_kind(cmd);

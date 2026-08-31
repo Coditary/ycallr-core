@@ -3,8 +3,8 @@
 use std::collections::HashMap;
 use tempfile::tempdir;
 use ycallr_core::{
-    client::EnvMode, ApiDefinition, BodyConfig, Command, EnvVar, HttpMethod, MultipartField, ParamType,
-    Parameter, YcallrClient,
+    client::EnvMode, ApiDefinition, BodyConfig, Command, EnvVar, HttpMethod, MultipartField,
+    ParamType, Parameter, YcallrClient,
 };
 
 #[test]
@@ -45,7 +45,10 @@ fn test_builder_envs_map() {
         .envs(vars)
         .build_context()
         .unwrap();
-    assert_eq!(ctx.env_vars.get("TOKEN").map(String::as_str), Some("secret"));
+    assert_eq!(
+        ctx.env_vars.get("TOKEN").map(String::as_str),
+        Some("secret")
+    );
 }
 
 #[test]
