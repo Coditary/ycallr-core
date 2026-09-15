@@ -55,8 +55,8 @@ struct CommandWithInclude {
 ///
 /// When `base_dir` is `None` (in-memory YAML), any `include` key is rejected.
 pub fn resolve_api_from_yaml(yaml: &str, base_dir: Option<&Path>) -> Result<ApiDefinition> {
-    let raw: ApiDefinitionRaw = serde_yaml::from_str(yaml)
-        .map_err(|e| YcallrError::YamlParse(e.to_string()))?;
+    let raw: ApiDefinitionRaw =
+        serde_yaml::from_str(yaml).map_err(|e| YcallrError::YamlParse(e.to_string()))?;
 
     let mut stack = HashSet::new();
     let commands = resolve_commands_map(&raw.commands, "commands", base_dir, &mut stack)?;
@@ -82,7 +82,10 @@ fn resolve_commands_map(
     let mut resolved = HashMap::new();
     for (name, cmd) in commands {
         let path = format!("{}.{}", path_prefix, name);
-        resolved.insert(name.clone(), resolve_command(cmd.clone(), &path, base_dir, stack)?);
+        resolved.insert(
+            name.clone(),
+            resolve_command(cmd.clone(), &path, base_dir, stack)?,
+        );
     }
     Ok(resolved)
 }
@@ -373,7 +376,9 @@ commands:
     #[test]
     fn test_include_without_base_dir_fails() {
         let err = resolve_api_from_yaml(MAIN, None).unwrap_err();
-        assert!(err.to_string().contains("requires parsing from a YAML file"));
+        assert!(err
+            .to_string()
+            .contains("requires parsing from a YAML file"));
     }
 
     #[test]
@@ -396,7 +401,9 @@ commands:
 
         let content = fs::read_to_string(dir.path().join("main.yaml")).unwrap();
         let err = resolve_api_from_yaml(&content, Some(dir.path())).unwrap_err();
-        assert!(err.to_string().contains("cannot use both 'include' and inline 'commands'"));
+        assert!(err
+            .to_string()
+            .contains("cannot use both 'include' and inline 'commands'"));
     }
 
     #[test]

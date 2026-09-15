@@ -179,8 +179,8 @@ commands:
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn test_parse_modular_example_yaml() {
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("examples/modular/github.yaml");
+        let path =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/modular/github.yaml");
         let api = parse_yaml_file_for_client(&path).unwrap();
         assert_eq!(api.name, "github");
         let issues = api.commands.get("issues").unwrap();
