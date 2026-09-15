@@ -1,0 +1,22 @@
+name: github
+version: "1.0.0"
+description: GitHub REST API (modular profile example)
+base_url: https://api.github.com
+
+env:
+  - name: GITHUB_TOKEN
+    required: true
+
+auth:
+  github:
+    type: bearer
+    token: ${GITHUB_TOKEN}
+
+errors:
+  default: "GitHub API error {status}"
+  401: "Unauthorized — export GITHUB_TOKEN with a valid personal access token"
+  404: "Not found"
+
+commands:
+  issues:
+    include: ./commands/issues.yaml

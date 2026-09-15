@@ -1,9 +1,9 @@
 use crate::error::{Result, YcallrError};
 use crate::models::ApiDefinition;
+use crate::yaml_includes;
 
 pub fn parse_yaml(yaml_content: &str) -> Result<ApiDefinition> {
-    let api: ApiDefinition =
-        serde_yaml::from_str(yaml_content).map_err(|e| YcallrError::YamlParse(e.to_string()))?;
+    let api = yaml_includes::resolve_api_from_yaml(yaml_content, None)?;
 
     api.validate()?;
 
@@ -12,8 +12,7 @@ pub fn parse_yaml(yaml_content: &str) -> Result<ApiDefinition> {
 
 /// Parse YAML for client/install use (allows loopback and private hosts).
 pub fn parse_yaml_for_client(yaml_content: &str) -> Result<ApiDefinition> {
-    let api: ApiDefinition =
-        serde_yaml::from_str(yaml_content).map_err(|e| YcallrError::YamlParse(e.to_string()))?;
+    let api = yaml_includes::resolve_api_from_yaml(yaml_content, None)?;
 
     api.validate_for_client()?;
 
@@ -24,14 +23,24 @@ pub fn parse_yaml_file(path: &std::path::Path) -> Result<ApiDefinition> {
     let content = std::fs::read_to_string(path)
         .map_err(|e| YcallrError::YamlParse(format!("Failed to read file: {}", e)))?;
 
-    parse_yaml(&content)
+    let base_dir = path.parent().unwrap_or_else(|| std::path::Path::new("."));
+    let api = yaml_includes::resolve_api_from_yaml(&content, Some(base_dir))?;
+
+    api.validate()?;
+
+    Ok(api)
 }
 
 pub fn parse_yaml_file_for_client(path: &std::path::Path) -> Result<ApiDefinition> {
     let content = std::fs::read_to_string(path)
         .map_err(|e| YcallrError::YamlParse(format!("Failed to read file: {}", e)))?;
 
-    parse_yaml_for_client(&content)
+    let base_dir = path.parent().unwrap_or_else(|| std::path::Path::new("."));
+    let api = yaml_includes::resolve_api_from_yaml(&content, Some(base_dir))?;
+
+    api.validate_for_client()?;
+
+    Ok(api)
 }
 
 #[cfg(test)]
@@ -139,6 +148,17 @@ commands:
 
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
+    fn test_parse_github_example_yaml() {
+        let path =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/github_api.yaml");
+        let api = parse_yaml_file_for_client(&path).unwrap();
+        assert_eq!(api.name, "github");
+        assert!(api.env.iter().any(|e| e.name == "GITHUB_TOKEN"));
+        assert!(api.auth.contains_key("github"));
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
     fn test_parse_yaml_file_not_found() {
         let path = std::path::Path::new("/nonexistent/path/test.yaml");
         let result = parse_yaml_file(path);
@@ -154,5 +174,49 @@ commands:
 
         let result = parse_yaml_file(&file_path);
         assert!(result.is_err());
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn test_parse_modular_example_yaml() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("examples/modular/github.yaml");
+        let api = parse_yaml_file_for_client(&path).unwrap();
+        assert_eq!(api.name, "github");
+        let issues = api.commands.get("issues").unwrap();
+        let children = issues.commands.as_ref().unwrap();
+        assert!(children.contains_key("create-issue"));
+        assert!(children.contains_key("list-issues"));
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn test_parse_yaml_file_with_include() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("repos.yaml"),
+            r#"
+list:
+  endpoint: /user/repos
+  method: GET
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join("main.yaml"),
+            r#"
+name: demo
+version: "1.0.0"
+base_url: https://api.example.com
+commands:
+  repos:
+    include: ./repos.yaml
+"#,
+        )
+        .unwrap();
+
+        let api = parse_yaml_file_for_client(&dir.path().join("main.yaml")).unwrap();
+        let repos = api.commands.get("repos").unwrap();
+        assert!(repos.commands.as_ref().unwrap().contains_key("list"));
     }
 }

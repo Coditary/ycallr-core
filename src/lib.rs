@@ -8,7 +8,13 @@ pub mod call_engine;
 pub mod profile_store;
 
 #[cfg(feature = "yaml")]
+pub mod yaml_includes;
+
+#[cfg(feature = "yaml")]
 pub mod yaml_parser;
+
+#[cfg(feature = "openapi")]
+pub mod openapi_importer;
 
 #[cfg(feature = "protobuf")]
 pub mod compiler;
