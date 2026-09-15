@@ -2,10 +2,27 @@ name: github
 version: "1.0.0"
 description: GitHub REST API
 base_url: https://api.github.com
+
+# Secrets are read at runtime via GITHUB_TOKEN, GITHUB_TOKEN_FILE, --env-file, or interactive prompt.
+env:
+  - name: GITHUB_TOKEN
+    required: true
+
+auth:
+  github:
+    type: bearer
+    token: ${GITHUB_TOKEN}
+
+errors:
+  default: "GitHub API error {status}"
+  401: "Unauthorized — export GITHUB_TOKEN with a valid personal access token"
+  404: "Not found"
+
 commands:
   create-issue:
     endpoint: /repos/{owner}/{repo}/issues
     method: POST
+    auth: github
     headers:
       Accept: application/vnd.github.v3+json
       Content-Type: application/json
@@ -26,10 +43,14 @@ commands:
         description: Issue body
         type: string
         required: false
+    responses:
+      "201":
+        message: "Created issue #{output.number}: {output.title}"
 
   list-issues:
     endpoint: /repos/{owner}/{repo}/issues
     method: GET
+    auth: github
     headers:
       Accept: application/vnd.github.v3+json
     params:
@@ -45,10 +66,18 @@ commands:
         description: Filter by state (open, closed, all)
         type: string
         required: false
+        enum:
+          - open
+          - closed
+          - all
+    responses:
+      success:
+        message: "Listed issues for {input.owner}/{input.repo}"
 
   get-issue:
     endpoint: /repos/{owner}/{repo}/issues/{issue_number}
     method: GET
+    auth: github
     headers:
       Accept: application/vnd.github.v3+json
     params:
@@ -64,3 +93,6 @@ commands:
         description: Issue number
         type: number
         required: true
+    responses:
+      success:
+        message: "Issue #{output.number}: {output.title}"

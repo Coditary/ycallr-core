@@ -13,9 +13,6 @@ pub mod yaml_includes;
 #[cfg(feature = "yaml")]
 pub mod yaml_parser;
 
-#[cfg(feature = "openapi")]
-pub mod openapi_importer;
-
 #[cfg(feature = "protobuf")]
 pub mod compiler;
 
