@@ -67,6 +67,12 @@ pub fn call(
         .map_err(|e| YcallrError::HttpClient(e.to_string()))?;
 
     let status = response.status().as_u16();
+    tracing::debug!(
+        method = prepared.method.as_str(),
+        url = %prepared.url,
+        status = status,
+        "received HTTP response"
+    );
 
     let headers: HashMap<String, String> = response
         .headers()
@@ -77,6 +83,14 @@ pub fn call(
     let body_text = response
         .text()
         .map_err(|e| YcallrError::HttpClient(e.to_string()))?;
+
+    tracing::trace!(
+        method = prepared.method.as_str(),
+        url = %prepared.url,
+        status = status,
+        bytes = body_text.len(),
+        "response body received"
+    );
 
     Ok(build_api_response(
         status,

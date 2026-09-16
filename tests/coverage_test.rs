@@ -166,6 +166,7 @@ fn test_validate_params_on_client() {
             description: "id".to_string(),
             param_type: ParamType::Number,
             required: true,
+            enum_values: None,
         },
     );
     commands.insert(

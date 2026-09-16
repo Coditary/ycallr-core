@@ -13,6 +13,7 @@ use crate::models::{ApiDefinition, AuthConfig};
 thread_local! {
     static LAST_ERROR: RefCell<Option<CString>> = const { RefCell::new(None) };
     static LAST_INSTALL_RESULT: RefCell<Option<String>> = const { RefCell::new(None) };
+    static LAST_IMPORT_RESULT: RefCell<Option<String>> = const { RefCell::new(None) };
 }
 
 fn set_last_error(msg: String) {
@@ -28,6 +29,16 @@ fn set_last_install_result(name: &str, pb_path: &std::path::Path) {
         "pb_path": pb_path.to_string_lossy(),
     });
     LAST_INSTALL_RESULT.with(|r| {
+        *r.borrow_mut() = serde_json::to_string(&json).ok();
+    });
+}
+
+fn set_last_import_result(name: &str, yaml_path: &std::path::Path) {
+    let json = serde_json::json!({
+        "name": name,
+        "yaml_path": yaml_path.to_string_lossy(),
+    });
+    LAST_IMPORT_RESULT.with(|r| {
         *r.borrow_mut() = serde_json::to_string(&json).ok();
     });
 }
@@ -541,6 +552,100 @@ pub extern "C" fn ycallr_list_installed() -> *mut c_char {
 #[no_mangle]
 pub extern "C" fn ycallr_get_last_install_result() -> *mut c_char {
     LAST_INSTALL_RESULT.with(|r| match r.borrow().as_ref() {
+        Some(json) => into_raw_cstring(json.clone()),
+        None => std::ptr::null_mut(),
+    })
+}
+
+/// Import OpenAPI 3.x from `source` into a YAML profile scaffold.
+///
+/// `nest_by`: `path` or `tag`; `short_names`: 1 = on, -1 = off, 0 = default.
+/// `preset`: `auto`, `github`, or `none`. Null optional strings use defaults.
+#[no_mangle]
+pub extern "C" fn ycallr_import_openapi_file(
+    source: *const c_char,
+    output: *const c_char,
+    name: *const c_char,
+    tag: *const c_char,
+    base_url: *const c_char,
+    nest_by: *const c_char,
+    short_names: i32,
+    preset: *const c_char,
+) -> i32 {
+    use crate::openapi_importer::{OpenApiImportOptions, OpenApiNestBy, OpenApiPreset};
+
+    let source_str = match unsafe { cstr_to_str(source) } {
+        Some(s) => s,
+        None => {
+            set_last_error("Invalid UTF-8 in OpenAPI source path".into());
+            return -1;
+        }
+    };
+
+    let output_path = unsafe { cstr_to_str(output) }.map(std::path::Path::new);
+    let name_opt = unsafe { cstr_to_str(name) };
+    let tag_opt = unsafe { cstr_to_str(tag) };
+    let base_url_opt = unsafe { cstr_to_str(base_url) };
+    let nest_by_opt = unsafe { cstr_to_str(nest_by) };
+    let preset_opt = unsafe { cstr_to_str(preset) };
+
+    let nest_by_mode = match nest_by_opt {
+        Some(value) => match OpenApiNestBy::parse(value) {
+            Ok(mode) => mode,
+            Err(e) => {
+                set_last_error(e.to_string());
+                return -1;
+            }
+        },
+        None => OpenApiNestBy::default(),
+    };
+
+    let preset_mode = match preset_opt {
+        Some(value) => match OpenApiPreset::parse(value) {
+            Ok(mode) => mode,
+            Err(e) => {
+                set_last_error(e.to_string());
+                return -1;
+            }
+        },
+        None => OpenApiPreset::default(),
+    };
+
+    let short_names_flag = match short_names {
+        1 => true,
+        -1 => false,
+        _ => nest_by_mode == OpenApiNestBy::Tag,
+    };
+
+    let options = OpenApiImportOptions {
+        name: name_opt.map(str::to_string),
+        tag: tag_opt.map(str::to_string),
+        base_url: base_url_opt.map(str::to_string),
+        nest_by: nest_by_mode,
+        short_names: short_names_flag,
+        preset: preset_mode,
+    };
+
+    match crate::profile_store::import_openapi_to_yaml_file(
+        std::path::Path::new(source_str),
+        output_path,
+        &options,
+    ) {
+        Ok((profile_name, yaml_path)) => {
+            set_last_import_result(&profile_name, &yaml_path);
+            0
+        }
+        Err(e) => {
+            set_last_error(e.to_string());
+            -1
+        }
+    }
+}
+
+/// After `ycallr_import_openapi_file`: `{"name":"...","yaml_path":"..."}`.
+#[no_mangle]
+pub extern "C" fn ycallr_get_last_import_result() -> *mut c_char {
+    LAST_IMPORT_RESULT.with(|r| match r.borrow().as_ref() {
         Some(json) => into_raw_cstring(json.clone()),
         None => std::ptr::null_mut(),
     })

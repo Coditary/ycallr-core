@@ -1,0 +1,76 @@
+openapi: 3.0.3
+info:
+  title: GitHub Enterprise Admin
+  version: "1.0.0"
+servers:
+  - url: https://github.example.com/api/v3
+paths:
+  "/admin/hooks":
+    get:
+      summary: List global webhooks
+      operationId: enterprise-admin/list-global-webhooks
+      tags: [enterprise-admin]
+      parameters:
+        - $ref: "#/components/parameters/per-page"
+        - $ref: "#/components/parameters/page"
+    post:
+      summary: Create a global webhook
+      operationId: enterprise-admin/create-global-webhook
+      tags: [enterprise-admin]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, config]
+              properties:
+                name:
+                  type: string
+                config:
+                  type: object
+                  required: [url]
+                  properties:
+                    url:
+                      type: string
+                    content_type:
+                      type: string
+                    secret:
+                      type: string
+                events:
+                  type: array
+                  items:
+                    type: string
+                active:
+                  type: boolean
+  "/admin/hooks/{hook_id}":
+    get:
+      summary: Get a global webhook
+      operationId: enterprise-admin/get-global-webhook
+      tags: [enterprise-admin]
+      parameters:
+        - $ref: "#/components/parameters/hook-id"
+components:
+  parameters:
+    per-page:
+      name: per_page
+      in: query
+      schema:
+        type: integer
+    page:
+      name: page
+      in: query
+      schema:
+        type: integer
+    hook-id:
+      name: hook_id
+      in: path
+      required: true
+      schema:
+        type: integer
+  securitySchemes:
+    github:
+      type: http
+      scheme: bearer
+security:
+  - github: []

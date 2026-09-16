@@ -115,6 +115,7 @@ mod tests {
                 description: "Repository owner".to_string(),
                 param_type: ParamType::String,
                 required: true,
+                enum_values: None,
             },
         );
 
@@ -269,6 +270,7 @@ mod tests {
                 description: "Repository owner".to_string(),
                 param_type: ParamType::String,
                 required: true,
+                enum_values: None,
             },
         );
 

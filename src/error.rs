@@ -3,6 +3,9 @@ pub enum YcallrError {
     #[error("YAML parse error: {0}")]
     YamlParse(String),
 
+    #[error("OpenAPI parse error: {0}")]
+    OpenApiParse(String),
+
     #[error("Invalid API definition: {0}")]
     InvalidDefinition(String),
 

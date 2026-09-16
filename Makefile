@@ -1,4 +1,4 @@
-.PHONY: build build-all build-release test test-wasm test-all coverage coverage-html lint fmt fmt-check clean check doc ci all
+.PHONY: build build-all build-release test test-wasm test-all coverage coverage-html lint fmt fmt-check clean check doc ci all release-check release-check-full
 
 all: build
 
@@ -26,7 +26,7 @@ coverage-html:
 	cargo tarpaulin --all-features --exclude-files src/wasm.rs --fail-under 85 --html -- --test-threads 1
 
 lint:
-	cargo clippy --all-features
+	cargo clippy --all-features -- -D warnings
 
 fmt:
 	cargo fmt
@@ -44,3 +44,13 @@ doc:
 	cargo doc --all-features
 
 ci: fmt-check lint test coverage
+
+release-check:
+	./scripts/check-release.sh
+
+release-check-full:
+	@if [ -z "$(VERSION)" ]; then \
+		echo "Usage: make release-check-full VERSION=0.1.2"; \
+		exit 1; \
+	fi
+	./scripts/check-release.sh --full $(VERSION)

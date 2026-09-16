@@ -5,7 +5,7 @@ use percent_encoding::{utf8_percent_encode, AsciiSet, NON_ALPHANUMERIC};
 use crate::error::{Result, YcallrError};
 use crate::models::builtin_response_template;
 use crate::models::{
-    ApiErrorConfig, ApiKeyLocation, AuthConfig, Command, HttpMethod, ResponseConfig,
+    ApiErrorConfig, ApiKeyLocation, AuthConfig, Command, HttpMethod, ParamType, ResponseConfig,
 };
 
 use super::context::ClientContext;
@@ -94,20 +94,32 @@ pub fn prepare_http_request(
     let prepared_body = if let Some(runtime_body) = body {
         PreparedBody::Json(runtime_body.clone())
     } else if let Some(body_config) = &cmd.body {
-        let resolved = templates::resolve_body(body_config, params)?;
+        let param_types: HashMap<String, ParamType> = cmd
+            .params
+            .iter()
+            .map(|(name, param)| (name.clone(), param.param_type.clone()))
+            .collect();
+        let resolved = templates::resolve_body_with_types(body_config, params, Some(&param_types))?;
         prepare_yaml_body(&resolved)?
     } else {
         PreparedBody::None
     };
 
-    Ok(PreparedHttpRequest {
+    let prepared = PreparedHttpRequest {
         method,
         url,
         headers,
         body: prepared_body,
         responses: cmd.responses.clone(),
         params: params.clone(),
-    })
+    };
+    tracing::debug!(
+        command = %command,
+        method = prepared.method.as_str(),
+        url = %prepared.url,
+        "prepared HTTP request"
+    );
+    Ok(prepared)
 }
 
 fn headers_map(
@@ -181,7 +193,7 @@ pub fn build_api_response(
     params: &HashMap<String, String>,
 ) -> ApiResponse {
     let body_json: serde_json::Value =
-        serde_json::from_str(&body_text).unwrap_or_else(|_| serde_json::Value::String(body_text));
+        serde_json::from_str(&body_text).unwrap_or(serde_json::Value::String(body_text));
 
     let (template, use_input_params) =
         resolve_response_template_source(status, command_responses, api_errors);
@@ -505,6 +517,7 @@ mod tests {
                 description: "owner".to_string(),
                 param_type: ParamType::String,
                 required: true,
+                enum_values: None,
             },
         );
         params_map.insert(
@@ -513,6 +526,7 @@ mod tests {
                 description: "repo".to_string(),
                 param_type: ParamType::String,
                 required: true,
+                enum_values: None,
             },
         );
 

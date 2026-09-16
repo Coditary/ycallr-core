@@ -86,15 +86,15 @@ impl AuthConfig {
 pub struct ApiDefinition {
     pub name: String,
     pub version: String,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub description: String,
     pub base_url: String,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub env: Vec<EnvVar>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub auth: HashMap<String, AuthConfig>,
     pub commands: HashMap<String, Command>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub errors: Option<ApiErrorConfig>,
 }
 
@@ -111,13 +111,13 @@ fn default_true() -> bool {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct BodyConfig {
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub json: Option<serde_json::Value>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub form: Option<HashMap<String, String>>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub multipart: Option<Vec<MultipartField>>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub raw: Option<String>,
 }
 
@@ -195,23 +195,23 @@ mod tests {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Command {
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
-    #[serde(default, alias = "path")]
+    #[serde(default, alias = "path", skip_serializing_if = "Option::is_none")]
     pub endpoint: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub method: Option<HttpMethod>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub auth: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub headers: HashMap<String, String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub params: HashMap<String, Parameter>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub body: Option<BodyConfig>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub responses: Option<ResponseConfig>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub commands: Option<HashMap<String, Command>>,
 }
 
@@ -253,6 +253,8 @@ pub struct Parameter {
     #[serde(rename = "type")]
     pub param_type: ParamType,
     pub required: bool,
+    #[serde(default, rename = "enum", skip_serializing_if = "Option::is_none")]
+    pub enum_values: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

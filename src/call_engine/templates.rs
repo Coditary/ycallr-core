@@ -1,4 +1,4 @@
-use crate::models::BodyConfig;
+use crate::models::{BodyConfig, ParamType};
 use regex::Regex;
 use std::collections::HashMap;
 
@@ -84,11 +84,19 @@ pub fn resolve_body(
     body_config: &BodyConfig,
     params: &HashMap<String, String>,
 ) -> crate::Result<BodyConfig> {
+    resolve_body_with_types(body_config, params, None)
+}
+
+pub fn resolve_body_with_types(
+    body_config: &BodyConfig,
+    params: &HashMap<String, String>,
+    param_types: Option<&HashMap<String, ParamType>>,
+) -> crate::Result<BodyConfig> {
     Ok(BodyConfig {
         json: body_config
             .json
             .as_ref()
-            .map(|v| resolve_json_templates(v, params))
+            .map(|v| resolve_json_templates_with_types(v, params, param_types))
             .transpose()?,
         form: body_config.form.as_ref().map(|m| {
             m.iter()
@@ -121,30 +129,94 @@ pub fn resolve_json_templates(
     value: &serde_json::Value,
     params: &HashMap<String, String>,
 ) -> crate::Result<serde_json::Value> {
+    resolve_json_templates_with_types(value, params, None)
+}
+
+pub fn resolve_json_templates_with_types(
+    value: &serde_json::Value,
+    params: &HashMap<String, String>,
+    param_types: Option<&HashMap<String, ParamType>>,
+) -> crate::Result<serde_json::Value> {
     match value {
-        serde_json::Value::String(s) => {
-            let mut resolved = s.clone();
-            for (key, val) in params {
-                resolved = resolved.replace(&format!("{{{}}}", key), val);
-            }
-            Ok(serde_json::Value::String(resolved))
-        }
+        serde_json::Value::String(s) => Ok(resolve_template_string(s, params, param_types)),
         serde_json::Value::Array(arr) => {
             let mut resolved = Vec::new();
             for item in arr {
-                resolved.push(resolve_json_templates(item, params)?);
+                match resolve_json_templates_with_types(item, params, param_types)? {
+                    serde_json::Value::Array(nested) => resolved.extend(nested),
+                    other => resolved.push(other),
+                }
             }
             Ok(serde_json::Value::Array(resolved))
         }
         serde_json::Value::Object(map) => {
             let mut resolved = serde_json::Map::new();
             for (k, v) in map {
-                resolved.insert(k.clone(), resolve_json_templates(v, params)?);
+                resolved.insert(
+                    k.clone(),
+                    resolve_json_templates_with_types(v, params, param_types)?,
+                );
             }
             Ok(serde_json::Value::Object(resolved))
         }
         other => Ok(other.clone()),
     }
+}
+
+fn resolve_template_string(
+    template: &str,
+    params: &HashMap<String, String>,
+    param_types: Option<&HashMap<String, ParamType>>,
+) -> serde_json::Value {
+    if let Some(key) = single_placeholder_key(template) {
+        if let Some(val) = params.get(key) {
+            if param_types
+                .and_then(|types| types.get(key))
+                .is_some_and(|t| *t == ParamType::Array)
+            {
+                return parse_array_param_value(val);
+            }
+            if template == format!("{{{key}}}") {
+                return parse_array_param_value(val);
+            }
+        }
+    }
+
+    let mut resolved = template.to_string();
+    for (key, val) in params {
+        resolved = resolved.replace(&format!("{{{key}}}"), val);
+    }
+    serde_json::Value::String(resolved)
+}
+
+fn single_placeholder_key(template: &str) -> Option<&str> {
+    if !template.starts_with('{') || !template.ends_with('}') {
+        return None;
+    }
+    let inner = &template[1..template.len() - 1];
+    if inner.contains('{') || inner.contains('}') {
+        return None;
+    }
+    Some(inner)
+}
+
+fn parse_array_param_value(value: &str) -> serde_json::Value {
+    if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(value) {
+        if parsed.is_array() {
+            return parsed;
+        }
+    }
+    if value.contains(',') {
+        return serde_json::Value::Array(
+            value
+                .split(',')
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(|s| serde_json::Value::String(s.to_string()))
+                .collect(),
+        );
+    }
+    serde_json::Value::String(value.to_string())
 }
 
 #[cfg(test)]
@@ -312,6 +384,24 @@ mod tests {
         let value = serde_json::json!({"field": "{key}"});
         let resolved = resolve_json_templates(&value, &params).unwrap();
         assert_eq!(resolved["field"], "value");
+    }
+
+    #[test]
+    fn test_resolve_json_templates_array_from_comma_separated_param() {
+        let mut types = HashMap::new();
+        types.insert("events".to_string(), ParamType::Array);
+        let params = HashMap::from([("events".to_string(), "org,user".to_string())]);
+        let value = serde_json::json!({"events": ["{events}"]});
+        let resolved = resolve_json_templates_with_types(&value, &params, Some(&types)).unwrap();
+        assert_eq!(resolved["events"], serde_json::json!(["org", "user"]));
+    }
+
+    #[test]
+    fn test_resolve_json_templates_nested_dotted_param() {
+        let params = HashMap::from([("config.url".to_string(), "https://example.com".to_string())]);
+        let value = serde_json::json!({"config": {"url": "{config.url}"}});
+        let resolved = resolve_json_templates(&value, &params).unwrap();
+        assert_eq!(resolved["config"]["url"], "https://example.com");
     }
 
     #[test]

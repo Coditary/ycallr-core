@@ -106,6 +106,7 @@ message Parameter {
   string description = 1;
   ParamType type = 2;
   bool required = 3;
+  repeated string enum_values = 4;
 }
 
 enum ParamType {

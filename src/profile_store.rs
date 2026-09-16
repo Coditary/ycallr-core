@@ -182,6 +182,38 @@ fn install_profile_yaml_path(name: &str, yaml_path: &Path) -> Result<PathBuf> {
     Ok(pb_path)
 }
 
+/// Import OpenAPI 3.x from disk and write a ycallr YAML profile scaffold.
+#[cfg(all(feature = "openapi", not(target_arch = "wasm32")))]
+pub fn import_openapi_to_yaml_file(
+    source: &Path,
+    output: Option<&Path>,
+    options: &crate::openapi_importer::OpenApiImportOptions,
+) -> Result<(String, PathBuf)> {
+    use crate::openapi_importer::{import_openapi, parse_openapi_content};
+
+    let content = std::fs::read_to_string(source).map_err(|e| {
+        YcallrError::OpenApiParse(format!("Failed to read {}: {e}", source.display()))
+    })?;
+    let doc = parse_openapi_content(&content)?;
+    let api = import_openapi(&doc, options)?;
+    let name = api.name.clone();
+    let yaml = serde_yaml::to_string(&api)
+        .map_err(|e| YcallrError::Serialization(format!("Failed to serialize YAML: {e}")))?;
+
+    let output_path = match output {
+        Some(path) => path.to_path_buf(),
+        None => source
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .join(format!("{}.yaml", name)),
+    };
+    if let Some(parent) = output_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(&output_path, yaml)?;
+    Ok((name, output_path))
+}
+
 /// Load `~/.config/ycallr/apis/<name>.pb` (fails if not installed).
 #[cfg(not(target_arch = "wasm32"))]
 pub fn load_installed_profile(name: &str) -> Result<ApiDefinition> {

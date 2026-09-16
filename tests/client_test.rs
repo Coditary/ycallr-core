@@ -16,6 +16,7 @@ fn create_test_api(base_url: &str) -> ApiDefinition {
             description: "Repository owner".to_string(),
             param_type: ParamType::String,
             required: true,
+            enum_values: None,
         },
     );
     get_params.insert(
@@ -24,6 +25,7 @@ fn create_test_api(base_url: &str) -> ApiDefinition {
             description: "Repository name".to_string(),
             param_type: ParamType::String,
             required: true,
+            enum_values: None,
         },
     );
 
@@ -52,6 +54,7 @@ fn create_test_api(base_url: &str) -> ApiDefinition {
             description: "Repository owner".to_string(),
             param_type: ParamType::String,
             required: true,
+            enum_values: None,
         },
     );
     post_params.insert(
@@ -60,6 +63,7 @@ fn create_test_api(base_url: &str) -> ApiDefinition {
             description: "Repository name".to_string(),
             param_type: ParamType::String,
             required: true,
+            enum_values: None,
         },
     );
     post_params.insert(
@@ -68,6 +72,7 @@ fn create_test_api(base_url: &str) -> ApiDefinition {
             description: "Issue title".to_string(),
             param_type: ParamType::String,
             required: true,
+            enum_values: None,
         },
     );
 
@@ -173,6 +178,7 @@ fn owner_repo_params() -> HashMap<String, ycallr_core::Parameter> {
                 description: "Repository owner".to_string(),
                 param_type: ycallr_core::ParamType::String,
                 required: true,
+                enum_values: None,
             },
         ),
         (
@@ -181,6 +187,7 @@ fn owner_repo_params() -> HashMap<String, ycallr_core::Parameter> {
                 description: "Repository name".to_string(),
                 param_type: ycallr_core::ParamType::String,
                 required: true,
+                enum_values: None,
             },
         ),
     ])
@@ -323,6 +330,7 @@ fn test_named_auth_bearer_from_yaml() {
             description: "Owner".to_string(),
             param_type: ycallr_core::ParamType::String,
             required: true,
+            enum_values: None,
         },
     );
     params.insert(
@@ -331,6 +339,7 @@ fn test_named_auth_bearer_from_yaml() {
             description: "Repo".to_string(),
             param_type: ycallr_core::ParamType::String,
             required: true,
+            enum_values: None,
         },
     );
 
@@ -398,6 +407,7 @@ fn test_named_auth_api_key_from_yaml() {
             description: "Owner".to_string(),
             param_type: ycallr_core::ParamType::String,
             required: true,
+            enum_values: None,
         },
     );
     params.insert(
@@ -406,6 +416,7 @@ fn test_named_auth_api_key_from_yaml() {
             description: "Repo".to_string(),
             param_type: ycallr_core::ParamType::String,
             required: true,
+            enum_values: None,
         },
     );
 
@@ -472,6 +483,7 @@ fn test_command_without_auth_uses_none() {
             description: "Owner".to_string(),
             param_type: ycallr_core::ParamType::String,
             required: true,
+            enum_values: None,
         },
     );
     params.insert(
@@ -480,6 +492,7 @@ fn test_command_without_auth_uses_none() {
             description: "Repo".to_string(),
             param_type: ycallr_core::ParamType::String,
             required: true,
+            enum_values: None,
         },
     );
 
@@ -607,6 +620,7 @@ fn test_get_query_params_appended() {
             description: "Owner".to_string(),
             param_type: ycallr_core::ParamType::String,
             required: true,
+            enum_values: None,
         },
     );
     params.insert(
@@ -615,6 +629,7 @@ fn test_get_query_params_appended() {
             description: "Repo".to_string(),
             param_type: ycallr_core::ParamType::String,
             required: true,
+            enum_values: None,
         },
     );
     params.insert(
@@ -623,6 +638,7 @@ fn test_get_query_params_appended() {
             description: "State".to_string(),
             param_type: ycallr_core::ParamType::String,
             required: false,
+            enum_values: None,
         },
     );
 
@@ -792,6 +808,7 @@ fn test_invalid_param_type_errors() {
                     description: "Item ID".to_string(),
                     param_type: ycallr_core::ParamType::Number,
                     required: true,
+                    enum_values: None,
                 },
             )]),
             body: None,
@@ -888,6 +905,7 @@ fn test_query_params_are_url_encoded() {
             description: "Owner".to_string(),
             param_type: ycallr_core::ParamType::String,
             required: true,
+            enum_values: None,
         },
     );
     params.insert(
@@ -896,6 +914,7 @@ fn test_query_params_are_url_encoded() {
             description: "Repo".to_string(),
             param_type: ycallr_core::ParamType::String,
             required: true,
+            enum_values: None,
         },
     );
     params.insert(
@@ -904,6 +923,7 @@ fn test_query_params_are_url_encoded() {
             description: "State".to_string(),
             param_type: ycallr_core::ParamType::String,
             required: false,
+            enum_values: None,
         },
     );
     params.insert(
@@ -912,6 +932,7 @@ fn test_query_params_are_url_encoded() {
             description: "Labels".to_string(),
             param_type: ycallr_core::ParamType::String,
             required: false,
+            enum_values: None,
         },
     );
 
@@ -1988,6 +2009,7 @@ fn test_duplicate_query_param_from_auth_and_params_errors() {
             description: "API key".to_string(),
             param_type: ParamType::String,
             required: false,
+            enum_values: None,
         },
     );
 
@@ -2052,6 +2074,7 @@ fn create_method_api(
                 description: "ID".to_string(),
                 param_type: ParamType::String,
                 required: true,
+                enum_values: None,
             },
         );
     }

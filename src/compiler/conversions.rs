@@ -231,6 +231,7 @@ pub fn param_to_proto(param: &Parameter) -> proto::Parameter {
         description: param.description.clone(),
         r#type: type_to_proto(&param.param_type) as i32,
         required: param.required,
+        enum_values: param.enum_values.clone().unwrap_or_default(),
     }
 }
 
@@ -239,6 +240,11 @@ pub fn param_from_proto(param: &proto::Parameter) -> Result<Parameter> {
         description: param.description.clone(),
         param_type: type_from_i32(param.r#type)?,
         required: param.required,
+        enum_values: if param.enum_values.is_empty() {
+            None
+        } else {
+            Some(param.enum_values.clone())
+        },
     })
 }
 

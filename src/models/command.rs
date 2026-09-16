@@ -64,6 +64,7 @@ impl Command {
             if let Some(value) = value {
                 if !value.trim().is_empty() {
                     validate_param_type(name, &param.param_type, &value)?;
+                    validate_param_enum(name, param.enum_values.as_deref(), &value)?;
                 }
             }
         }
@@ -208,6 +209,23 @@ fn json_value_to_param_string(value: &serde_json::Value) -> Option<String> {
     }
 }
 
+fn validate_param_enum(name: &str, allowed: Option<&[String]>, value: &str) -> crate::Result<()> {
+    let Some(allowed) = allowed.filter(|values| !values.is_empty()) else {
+        return Ok(());
+    };
+
+    if allowed.iter().any(|candidate| candidate == value) {
+        return Ok(());
+    }
+
+    Err(crate::YcallrError::ParamValidation(format!(
+        "Parameter '{}' must be one of [{}], got '{}'",
+        name,
+        allowed.join(", "),
+        value
+    )))
+}
+
 fn validate_param_type(name: &str, param_type: &ParamType, value: &str) -> crate::Result<()> {
     match param_type {
         ParamType::String => Ok(()),
@@ -255,6 +273,7 @@ mod tests {
             description: name.to_string(),
             param_type,
             required,
+            enum_values: None,
         }
     }
 
@@ -402,6 +421,50 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("Unknown parameter 'extra'"));
+    }
+
+    #[test]
+    fn test_validate_params_enum_values() {
+        let cmd = Command {
+            description: None,
+            endpoint: Some("/items".to_string()),
+            method: Some(HttpMethod::GET),
+            auth: None,
+            headers: HashMap::new(),
+            params: HashMap::from([(
+                "state".to_string(),
+                Parameter {
+                    description: "Issue state".to_string(),
+                    param_type: ParamType::String,
+                    required: false,
+                    enum_values: Some(vec![
+                        "open".to_string(),
+                        "closed".to_string(),
+                        "all".to_string(),
+                    ]),
+                },
+            )]),
+            body: None,
+            responses: None,
+            commands: None,
+        };
+
+        assert!(cmd
+            .validate_params(
+                &HashMap::from([("state".to_string(), "open".to_string())]),
+                None,
+            )
+            .is_ok());
+
+        let err = cmd
+            .validate_params(
+                &HashMap::from([("state".to_string(), "invalid".to_string())]),
+                None,
+            )
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("must be one of"));
+        assert!(err.contains("open, closed, all"));
     }
 
     #[test]

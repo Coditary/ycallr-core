@@ -1,0 +1,70 @@
+openapi: 3.0.3
+info:
+  title: GitHub REST API
+  version: "1.0.0"
+  description: GitHub issues subset for ycallr import demo
+servers:
+  - url: https://api.github.com
+paths:
+  /repos/{owner}/{repo}/issues:
+    get:
+      summary: List issues
+      tags: [issues]
+      parameters:
+        - name: owner
+          in: path
+          required: true
+          schema: { type: string }
+        - name: repo
+          in: path
+          required: true
+          schema: { type: string }
+        - name: state
+          in: query
+          schema: { type: string }
+    post:
+      summary: Create issue
+      tags: [issues]
+      parameters:
+        - name: owner
+          in: path
+          required: true
+          schema: { type: string }
+        - name: repo
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title]
+              properties:
+                title: { type: string }
+                body: { type: string }
+  /repos/{owner}/{repo}/issues/{issue_number}:
+    get:
+      summary: Get issue
+      tags: [issues]
+      parameters:
+        - name: owner
+          in: path
+          required: true
+          schema: { type: string }
+        - name: repo
+          in: path
+          required: true
+          schema: { type: string }
+        - name: issue_number
+          in: path
+          required: true
+          schema: { type: integer }
+components:
+  securitySchemes:
+    github:
+      type: http
+      scheme: bearer
+security:
+  - github: []

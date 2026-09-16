@@ -12,8 +12,9 @@ use ycallr_core::ffi::{
     ycallr_command_get_path_params_json, ycallr_command_has_body, ycallr_command_is_branch,
     ycallr_command_is_leaf, ycallr_compiled_profile_path, ycallr_free_api, ycallr_free_command,
     ycallr_free_response, ycallr_get_base_url, ycallr_get_command, ycallr_get_description,
-    ycallr_get_env_json, ycallr_get_last_error, ycallr_get_last_install_result, ycallr_get_name,
-    ycallr_get_version, ycallr_install, ycallr_install_yaml_file, ycallr_list_commands,
+    ycallr_get_env_json, ycallr_get_last_error, ycallr_get_last_import_result,
+    ycallr_get_last_install_result, ycallr_get_name, ycallr_get_version,
+    ycallr_import_openapi_file, ycallr_install, ycallr_install_yaml_file, ycallr_list_commands,
     ycallr_list_installed, ycallr_list_subcommands, ycallr_load_installed,
     ycallr_missing_params_json, ycallr_parse_proto, ycallr_parse_yaml,
     ycallr_response_get_body_json, ycallr_response_get_headers_json, ycallr_response_get_message,
@@ -951,4 +952,289 @@ fn test_ffi_command_path_params_and_body_flag() {
     ycallr_string_free(path_params);
     ycallr_free_command(cmd);
     ycallr_free_api(api);
+}
+
+const OPENAPI_FOR_FFI: &str = r#"
+openapi: 3.0.3
+info:
+  title: GitHub REST API
+  version: "1.0.0"
+servers:
+  - url: https://api.github.com
+paths:
+  /repos/{owner}/{repo}/issues:
+    get:
+      summary: List issues
+      operationId: repos/list-issues
+      tags: [issues]
+      parameters:
+        - name: owner
+          in: path
+          required: true
+          schema: { type: string }
+        - name: repo
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: ok
+    post:
+      summary: Create issue
+      operationId: repos/create-issue
+      tags: [issues]
+      parameters:
+        - name: owner
+          in: path
+          required: true
+          schema: { type: string }
+        - name: repo
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title]
+              properties:
+                title: { type: string }
+      responses:
+        '201':
+          description: created
+"#;
+
+// ─── OpenAPI import (FFI) ─────────────────────────────────────────────
+
+#[test]
+fn test_ffi_import_openapi_success_with_tag_nesting() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("github.openapi.yaml");
+    let output = dir.path().join("github.yaml");
+    std::fs::write(&source, OPENAPI_FOR_FFI).unwrap();
+
+    let rc = ycallr_import_openapi_file(
+        cstr(source.to_str().unwrap()),
+        cstr(output.to_str().unwrap()),
+        cstr("gh"),
+        ptr::null(),
+        ptr::null(),
+        cstr("tag"),
+        0,
+        ptr::null(),
+    );
+    assert_eq!(
+        rc,
+        0,
+        "import failed: {:?}",
+        c_string_to_str(ycallr_get_last_error())
+    );
+
+    let result = ycallr_get_last_import_result();
+    assert!(!result.is_null());
+    let json = c_string_to_str(result).unwrap();
+    assert!(json.contains("gh"));
+    assert!(json.contains("yaml_path"));
+    ycallr_string_free(result);
+
+    let yaml = std::fs::read_to_string(&output).unwrap();
+    assert!(yaml.contains("issues:"));
+    assert!(yaml.contains("list:"));
+    assert!(!yaml.contains("\nrepos:"));
+}
+
+#[test]
+fn test_ffi_import_openapi_default_output_path() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("source.openapi.yaml");
+    std::fs::write(&source, OPENAPI_FOR_FFI).unwrap();
+
+    let expected = dir.path().join("custom-name.yaml");
+    let rc = ycallr_import_openapi_file(
+        cstr(source.to_str().unwrap()),
+        ptr::null(),
+        cstr("custom-name"),
+        ptr::null(),
+        ptr::null(),
+        ptr::null(),
+        0,
+        ptr::null(),
+    );
+    assert_eq!(rc, 0);
+    assert!(expected.exists());
+}
+
+#[test]
+fn test_ffi_import_openapi_missing_source() {
+    let output = tempfile::tempdir().unwrap().path().join("out.yaml");
+    let rc = ycallr_import_openapi_file(
+        cstr("/nonexistent/ycallr-ffi-openapi.yaml"),
+        cstr(output.to_str().unwrap()),
+        ptr::null(),
+        ptr::null(),
+        ptr::null(),
+        ptr::null(),
+        0,
+        ptr::null(),
+    );
+    assert_eq!(rc, -1);
+
+    let err = ycallr_get_last_error();
+    assert!(!err.is_null());
+    let err_str = c_string_to_str(err).unwrap();
+    assert!(err_str.contains("Failed to read"), "got: {err_str}");
+}
+
+#[test]
+fn test_ffi_import_openapi_invalid_yaml() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("broken.openapi.yaml");
+    let output = dir.path().join("out.yaml");
+    std::fs::write(&source, "openapi: [broken").unwrap();
+
+    let rc = ycallr_import_openapi_file(
+        cstr(source.to_str().unwrap()),
+        cstr(output.to_str().unwrap()),
+        ptr::null(),
+        ptr::null(),
+        ptr::null(),
+        ptr::null(),
+        0,
+        ptr::null(),
+    );
+    assert_eq!(rc, -1);
+
+    let err = ycallr_get_last_error();
+    assert!(!err.is_null());
+    let err_str = c_string_to_str(err).unwrap();
+    assert!(err_str.contains("Invalid OpenAPI YAML"), "got: {err_str}");
+    assert!(!output.exists());
+}
+
+#[test]
+fn test_ffi_import_openapi_invalid_nest_by() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("api.openapi.yaml");
+    let output = dir.path().join("out.yaml");
+    std::fs::write(&source, OPENAPI_FOR_FFI).unwrap();
+
+    let rc = ycallr_import_openapi_file(
+        cstr(source.to_str().unwrap()),
+        cstr(output.to_str().unwrap()),
+        ptr::null(),
+        ptr::null(),
+        ptr::null(),
+        cstr("hybrid"),
+        0,
+        ptr::null(),
+    );
+    assert_eq!(rc, -1);
+
+    let err = ycallr_get_last_error();
+    assert!(!err.is_null());
+    let err_str = c_string_to_str(err).unwrap();
+    assert!(err_str.contains("Invalid nest-by value"), "got: {err_str}");
+    assert!(!output.exists());
+}
+
+#[test]
+fn test_ffi_import_openapi_unknown_tag_filter() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("api.openapi.yaml");
+    let output = dir.path().join("out.yaml");
+    std::fs::write(&source, OPENAPI_FOR_FFI).unwrap();
+
+    let rc = ycallr_import_openapi_file(
+        cstr(source.to_str().unwrap()),
+        cstr(output.to_str().unwrap()),
+        ptr::null(),
+        cstr("nonexistent-tag"),
+        ptr::null(),
+        ptr::null(),
+        0,
+        ptr::null(),
+    );
+    assert_eq!(rc, -1);
+
+    let err = ycallr_get_last_error();
+    assert!(!err.is_null());
+    let err_str = c_string_to_str(err).unwrap();
+    assert!(err_str.contains("No operations found"), "got: {err_str}");
+}
+
+#[test]
+fn test_ffi_import_openapi_null_source() {
+    let rc = ycallr_import_openapi_file(
+        ptr::null(),
+        ptr::null(),
+        ptr::null(),
+        ptr::null(),
+        ptr::null(),
+        ptr::null(),
+        0,
+        ptr::null(),
+    );
+    assert_eq!(rc, -1);
+
+    let err = ycallr_get_last_error();
+    assert!(!err.is_null());
+    let err_str = c_string_to_str(err).unwrap();
+    assert!(err_str.contains("Invalid UTF-8"), "got: {err_str}");
+}
+
+#[test]
+fn test_ffi_import_openapi_tolerates_broken_ref() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("broken-ref.openapi.yaml");
+    let output = dir.path().join("broken-ref.yaml");
+    std::fs::write(
+        &source,
+        r##"
+openapi: 3.0.3
+info:
+  title: Broken Ref API
+  version: "1.0.0"
+servers:
+  - url: https://api.example.com
+paths:
+  /items:
+    get:
+      operationId: items/list
+      tags: [items]
+      parameters:
+        - $ref: "#/components/parameters/missing"
+        - name: q
+          in: query
+          schema: { type: string }
+      responses:
+        '200':
+          description: ok
+components:
+  parameters: {}
+"##,
+    )
+    .unwrap();
+
+    let rc = ycallr_import_openapi_file(
+        cstr(source.to_str().unwrap()),
+        cstr(output.to_str().unwrap()),
+        cstr("broken-ref"),
+        ptr::null(),
+        ptr::null(),
+        cstr("tag"),
+        0,
+        ptr::null(),
+    );
+    assert_eq!(
+        rc,
+        0,
+        "import failed: {:?}",
+        c_string_to_str(ycallr_get_last_error())
+    );
+
+    let yaml = std::fs::read_to_string(&output).unwrap();
+    assert!(yaml.contains("q:"));
+    assert!(!yaml.contains("missing:"));
 }

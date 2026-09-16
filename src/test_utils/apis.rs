@@ -13,6 +13,7 @@ pub fn github_api() -> ApiDefinition {
             description: "Repository owner".to_string(),
             param_type: ParamType::String,
             required: true,
+            enum_values: None,
         },
     );
     get_repo_params.insert(
@@ -21,6 +22,7 @@ pub fn github_api() -> ApiDefinition {
             description: "Repository name".to_string(),
             param_type: ParamType::String,
             required: true,
+            enum_values: None,
         },
     );
 
@@ -52,6 +54,7 @@ pub fn github_api() -> ApiDefinition {
             description: "Repository owner".to_string(),
             param_type: ParamType::String,
             required: true,
+            enum_values: None,
         },
     );
     create_issue_params.insert(
@@ -60,6 +63,7 @@ pub fn github_api() -> ApiDefinition {
             description: "Repository name".to_string(),
             param_type: ParamType::String,
             required: true,
+            enum_values: None,
         },
     );
     create_issue_params.insert(
@@ -68,6 +72,7 @@ pub fn github_api() -> ApiDefinition {
             description: "Issue title".to_string(),
             param_type: ParamType::String,
             required: true,
+            enum_values: None,
         },
     );
 
@@ -100,6 +105,7 @@ pub fn github_api() -> ApiDefinition {
             description: "Repository owner".to_string(),
             param_type: ParamType::String,
             required: true,
+            enum_values: None,
         },
     );
     list_issues_params.insert(
@@ -108,6 +114,7 @@ pub fn github_api() -> ApiDefinition {
             description: "Repository name".to_string(),
             param_type: ParamType::String,
             required: true,
+            enum_values: None,
         },
     );
     list_issues_params.insert(
@@ -116,6 +123,7 @@ pub fn github_api() -> ApiDefinition {
             description: "Filter by state (open, closed, all)".to_string(),
             param_type: ParamType::String,
             required: false,
+            enum_values: None,
         },
     );
 
@@ -162,6 +170,7 @@ pub fn simple_api() -> ApiDefinition {
             description: "Resource ID".to_string(),
             param_type: ParamType::String,
             required: true,
+            enum_values: None,
         },
     );
 

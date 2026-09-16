@@ -132,6 +132,7 @@ mod tests {
                 description: "Repository owner".to_string(),
                 param_type: ParamType::String,
                 required: true,
+                enum_values: None,
             },
         );
 
@@ -141,6 +142,7 @@ mod tests {
                 description: "Repository name".to_string(),
                 param_type: ParamType::String,
                 required: true,
+                enum_values: None,
             },
         );
 
@@ -169,6 +171,7 @@ mod tests {
                 description: "Issue title".to_string(),
                 param_type: ParamType::String,
                 required: true,
+                enum_values: None,
             },
         );
 
@@ -212,6 +215,7 @@ mod tests {
                 description: "Repository owner".to_string(),
                 param_type: ParamType::String,
                 required: true,
+                enum_values: None,
             },
         );
 
@@ -221,6 +225,7 @@ mod tests {
                 description: "Repository name".to_string(),
                 param_type: ParamType::String,
                 required: true,
+                enum_values: None,
             },
         );
 
@@ -739,6 +744,7 @@ mod client_integration_tests {
                 description: "Repository owner".to_string(),
                 param_type: crate::models::ParamType::String,
                 required: true,
+                enum_values: None,
             },
         );
 
@@ -748,6 +754,7 @@ mod client_integration_tests {
                 description: "Repository name".to_string(),
                 param_type: crate::models::ParamType::String,
                 required: true,
+                enum_values: None,
             },
         );
 

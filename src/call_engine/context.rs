@@ -18,7 +18,7 @@ pub fn resolve_client_env(
     env_mode: &EnvMode,
     env_vars: &HashMap<String, String>,
 ) -> Result<HashMap<String, String>> {
-    for (key, _) in env_vars {
+    for key in env_vars.keys() {
         validate_declared_env_key(api, key)?;
     }
 
@@ -27,7 +27,7 @@ pub fn resolve_client_env(
     for env_var in &api.env {
         match env_mode {
             EnvMode::Auto => {
-                if let Ok(val) = std::env::var(&env_var.name) {
+                if let Some(val) = read_env_value(&env_var.name) {
                     resolved_env.insert(env_var.name.clone(), val);
                 } else if let Some(val) = env_vars.get(&env_var.name) {
                     resolved_env.insert(env_var.name.clone(), val.clone());
@@ -50,6 +50,36 @@ pub fn resolve_client_env(
     validate_resolved_env_vars(api, &resolved_env)?;
 
     Ok(resolved_env)
+}
+
+/// Read an env value from `VAR` or `VAR_FILE` (file path whose contents are the secret).
+pub fn read_env_value(name: &str) -> Option<String> {
+    if let Ok(val) = std::env::var(name) {
+        if !val.is_empty() {
+            return Some(val);
+        }
+    }
+
+    let file_key = format!("{}_FILE", name);
+    if let Ok(path) = std::env::var(&file_key) {
+        return read_secret_file(&path).ok();
+    }
+
+    None
+}
+
+fn read_secret_file(path: &str) -> Result<String> {
+    let contents = std::fs::read_to_string(path).map_err(|e| {
+        YcallrError::EnvVar(format!("Failed to read secret file '{}': {}", path, e))
+    })?;
+    let value = contents.trim_end_matches(['\n', '\r']).to_string();
+    if value.is_empty() {
+        return Err(YcallrError::EnvVar(format!(
+            "Secret file '{}' is empty",
+            path
+        )));
+    }
+    Ok(value)
 }
 
 fn validate_declared_env_key(api: &ApiDefinition, key: &str) -> Result<()> {
@@ -75,7 +105,9 @@ fn validate_resolved_env_vars(
         match resolved_env.get(&env_var.name) {
             None => {
                 return Err(YcallrError::EnvVar(format!(
-                    "Required environment variable '{}' is not set",
+                    "Required environment variable '{}' is not set (set {}, {}_FILE, use --env-file, or enter interactively)",
+                    env_var.name,
+                    env_var.name,
                     env_var.name
                 )));
             }
@@ -144,5 +176,20 @@ mod tests {
         let manual = HashMap::from([(key.to_string(), "manual".to_string())]);
         let resolved = resolve_client_env(&api, &EnvMode::Auto, &manual).unwrap();
         assert_eq!(resolved.get(key), Some(&"manual".to_string()));
+    }
+
+    #[test]
+    fn test_read_env_value_from_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("token.txt");
+        std::fs::write(&path, "secret-from-file\n").unwrap();
+
+        let key = "YCALLR_FILE_TEST_TOKEN";
+        std::env::remove_var(key);
+        std::env::set_var(format!("{}_FILE", key), path);
+
+        assert_eq!(read_env_value(key), Some("secret-from-file".to_string()));
+
+        std::env::remove_var(format!("{}_FILE", key));
     }
 }

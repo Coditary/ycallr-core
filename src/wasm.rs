@@ -276,7 +276,6 @@ impl YcallrWasmClient {
         let ctx = self.context.clone();
         let command = command.to_string();
         let params_json = params_json.to_string();
-        let body_json = body_json;
 
         future_to_promise(async move {
             let params: HashMap<String, String> = serde_json::from_str(&params_json)
@@ -385,11 +384,9 @@ async fn execute_fetch(prepared: &PreparedHttpRequest) -> Result<FetchResult, St
 
     let status = response.status();
     let mut response_headers = HashMap::new();
-    if let Ok(content_type) = response.headers().get("content-type") {
-        if let Some(content_type) = content_type {
-            if !content_type.is_empty() {
-                response_headers.insert("content-type".to_string(), content_type);
-            }
+    if let Ok(Some(content_type)) = response.headers().get("content-type") {
+        if !content_type.is_empty() {
+            response_headers.insert("content-type".to_string(), content_type);
         }
     }
 

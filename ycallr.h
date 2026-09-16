@@ -82,6 +82,26 @@ char *ycallr_list_installed(void);
 char *ycallr_get_last_install_result(void);
 
 /**
+ * Import OpenAPI 3.x from `source` into a YAML profile scaffold.
+ *
+ * `nest_by`: `path` or `tag`; `short_names`: 1 = on, -1 = off, 0 = default.
+ * `preset`: `auto`, `github`, or `none`. Null optional strings use defaults.
+ */
+int32_t ycallr_import_openapi_file(const char *source,
+                                   const char *output,
+                                   const char *name,
+                                   const char *tag,
+                                   const char *base_url,
+                                   const char *nest_by,
+                                   int32_t short_names,
+                                   const char *preset);
+
+/**
+ * After `ycallr_import_openapi_file`: `{"name":"...","yaml_path":"..."}`.
+ */
+char *ycallr_get_last_import_result(void);
+
+/**
  * Returns filesystem path to `~/.config/ycallr/apis/<name>.pb`.
  */
 char *ycallr_compiled_profile_path(const char *name);

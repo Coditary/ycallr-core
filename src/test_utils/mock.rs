@@ -13,6 +13,12 @@ pub struct MockCall {
     pub body: Option<serde_json::Value>,
 }
 
+impl Default for MockApiClient {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MockApiClient {
     pub fn new() -> Self {
         Self {
